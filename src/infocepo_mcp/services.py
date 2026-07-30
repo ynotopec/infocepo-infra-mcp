@@ -12,8 +12,18 @@ from botocore.config import Config
 from .config import Config as AppConfig
 
 
+# Self-signed cert services (verify=False)
+SELF_SIGNED_SERVICES = {"summary", "chromadb", "registry", "s3"}
+
+
 def _get_config() -> AppConfig:
     return AppConfig()
+
+
+def _http_client(service_name: str = "api") -> httpx.Client:
+    """Create an httpx client with proper SSL settings per service."""
+    verify = service_name not in SELF_SIGNED_SERVICES
+    return httpx.Client(verify=verify, timeout=120)
 
 
 def _make_llm_request(endpoint: str, data: dict) -> dict:
@@ -22,7 +32,7 @@ def _make_llm_request(endpoint: str, data: dict) -> dict:
     key = config.get_llm_api_key()
     base_url = config.services.clean_url(endpoint)
 
-    with httpx.Client(timeout=120) as client:
+    with _http_client("api") as client:
         resp = client.post(
             base_url,
             json=data,
@@ -68,7 +78,6 @@ def handle_llm_vision(args: dict) -> str:
         if img_data.startswith("data:"):
             content.append({"type": "image_url", "image_url": {"url": img_data}})
         else:
-            # Assume raw base64, prepend data URI
             content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_data}"}})
 
     prompt = args.get("prompt", "Décris cette image.")
@@ -109,7 +118,7 @@ def handle_stt_transcribe(args: dict) -> str:
     else:
         return json.dumps({"error": "No audio source provided. Use audio_path, audio_url, or audio_b64."})
 
-    with httpx.Client(timeout=120) as client:
+    with _http_client("stt") as client:
         files = {
             "file": (filename, audio_data, content_type),
             "model": (None, args.get("model", "whisper-1")),
@@ -122,7 +131,11 @@ def handle_stt_transcribe(args: dict) -> str:
             headers={"Authorization": f"Bearer {key}"},
         )
         if resp.status_code != 200:
-            return json.dumps({"error": f"HTTP {resp.status_code}", "detail": resp.text[:500]})
+            return json.dumps({
+                "error": f"HTTP {resp.status_code}",
+                "detail": resp.text[:500],
+                "hint": "The endpoint exists but may require proper audio format (OPUS 16kHz mono recommended)."
+            })
         return json.dumps(resp.json(), indent=2, ensure_ascii=False)
 
 
@@ -141,7 +154,7 @@ def handle_tts_speech(args: dict) -> str:
     if args.get("instructions"):
         data["instructions"] = args["instructions"]
 
-    with httpx.Client(timeout=30) as client:
+    with _http_client("tts") as client:
         resp = client.post(
             base_url,
             json=data,
@@ -152,14 +165,14 @@ def handle_tts_speech(args: dict) -> str:
             },
         )
         if resp.status_code != 200:
-            return json.dumps({"error": f"HTTP {resp.status_code}", "detail": resp.text[:500]})
-        # Save audio to temp file, return path
-        output_format = data.get("response_format", "opus")
-        fmt = ".opus" if output_format == "opus" else f".{output_format}"
-        tmp_path = tempfile.mktemp(suffix=fmt)
+            return json.dumps({
+                "error": f"HTTP {resp.status_code}",
+                "detail": resp.text[:500]
+            })
+        tmp_path = tempfile.mktemp(suffix=".opus")
         with open(tmp_path, "wb") as f:
             f.write(resp.content)
-        return json.dumps({"audio_path": tmp_path, "format": output_format, "voice": data.get("voice")})
+        return json.dumps({"audio_path": tmp_path, "format": data.get("response_format"), "voice": data.get("voice")})
 
 
 def handle_image_generate(args: dict) -> str:
@@ -174,7 +187,7 @@ def handle_image_generate(args: dict) -> str:
         "size": args.get("size", "1024x1024"),
     }
 
-    with httpx.Client(timeout=120) as client:
+    with _http_client("t2i") as client:
         resp = client.post(
             base_url,
             json=data,
@@ -185,9 +198,11 @@ def handle_image_generate(args: dict) -> str:
             },
         )
         if resp.status_code != 200:
-            return json.dumps({"error": f"HTTP {resp.status_code}", "detail": resp.text[:500]})
+            return json.dumps({
+                "error": f"HTTP {resp.status_code}",
+                "detail": resp.text[:500]
+            })
         result = resp.json()
-        # Return image URLs or data URIs
         if "data" in result:
             for item in result["data"]:
                 if "url" in item:
@@ -197,8 +212,7 @@ def handle_image_generate(args: dict) -> str:
                         with open(item["saved_to"], "wb") as f:
                             f.write(img_resp.content)
                 elif "b64_json" in item:
-                    import base64 as b64mod
-                    img_data = b64mod.b64decode(item["b64_json"])
+                    img_data = base64.b64decode(item["b64_json"])
                     item["saved_to"] = tempfile.mktemp(suffix=".png")
                     with open(item["saved_to"], "wb") as f:
                         f.write(img_data)
@@ -215,14 +229,18 @@ def handle_embeddings_create(args: dict) -> str:
         "input": args["texts"],
     }
 
-    with httpx.Client(timeout=30) as client:
+    with _http_client("embedding") as client:
         resp = client.post(
             base_url,
             json=data,
             headers={"Content-Type": "application/json"},
         )
         if resp.status_code != 200:
-            return json.dumps({"error": f"HTTP {resp.status_code}", "detail": resp.text[:500]})
+            return json.dumps({
+                "error": f"HTTP {resp.status_code}",
+                "detail": resp.text[:500],
+                "hint": "Embedding service requires authentication. Set a proper API key for this service."
+            })
         result = resp.json()
         return json.dumps(result, indent=2, ensure_ascii=False)
 
@@ -233,6 +251,9 @@ def handle_chromadb_collections(args: dict) -> str:
     from .config import ServicesConfig
     chroma_url = config.services.chroma_url(args.get("env"))
     token = config.creds.chroma_token
+
+    if not token:
+        return json.dumps({"error": "ChromaDB token not configured. Set INFOCEPO_CHROMA_TOKEN or chroma_token in credentials."})
 
     try:
         import chromadb
@@ -245,7 +266,7 @@ def handle_chromadb_collections(args: dict) -> str:
             settings=Settings(
                 chroma_client_auth_provider="chromadb.auth.token.TokenAuthClientProvider",
                 chroma_client_auth_credentials=token,
-            ) if token else Settings()
+            )
         )
         collections = client.list_collections()
         return json.dumps([c.name for c in collections], indent=2)
@@ -259,6 +280,9 @@ def handle_chromadb_search(args: dict) -> str:
     chroma_url = config.services.chroma_url(args.get("env"))
     token = config.creds.chroma_token
 
+    if not token:
+        return json.dumps({"error": "ChromaDB token not configured."})
+
     try:
         import chromadb
         from chromadb.config import Settings
@@ -270,16 +294,16 @@ def handle_chromadb_search(args: dict) -> str:
             settings=Settings(
                 chroma_client_auth_provider="chromadb.auth.token.TokenAuthClientProvider",
                 chroma_client_auth_credentials=token,
-            ) if token else Settings()
+            )
         )
         collection = client.get_or_create_collection(args["collection"])
 
-        # Auto-embed the query
         query = args["query"]
-        embedding_config = _get_config()
-        emb_base = embedding_config.services.clean_url(embedding_config.services.embedding_base) + "/embeddings"
 
-        with httpx.Client(timeout=30) as emb_client:
+        # Auto-embed the query
+        emb_base = config.services.clean_url(config.services.embedding_base) + "/embeddings"
+
+        with _http_client("embedding") as emb_client:
             emb_resp = emb_client.post(
                 emb_base,
                 json={"model": "bge-m3", "input": [query]},
@@ -306,6 +330,9 @@ def handle_chromadb_upsert(args: dict) -> str:
     chroma_url = config.services.chroma_url(args.get("env"))
     token = config.creds.chroma_token
 
+    if not token:
+        return json.dumps({"error": "ChromaDB token not configured."})
+
     try:
         import chromadb
         from chromadb.config import Settings
@@ -317,7 +344,7 @@ def handle_chromadb_upsert(args: dict) -> str:
             settings=Settings(
                 chroma_client_auth_provider="chromadb.auth.token.TokenAuthClientProvider",
                 chroma_client_auth_credentials=token,
-            ) if token else Settings()
+            )
         )
         collection = client.get_or_create_collection(args["collection"])
 
@@ -334,27 +361,38 @@ def handle_chromadb_upsert(args: dict) -> str:
 def handle_summary_text(args: dict) -> str:
     """Summary API handler."""
     config = _get_config()
-    base_url = config.services.clean_url(config.services.summary_base) + "/summary/"
+    # Strip :wait-YYYY-MM — not a port, just a wiki annotation
+    base_url = config.services.clean_url(config.services.summary_base)
+    if not base_url.startswith("https://"):
+        base_url = "https://" + base_url
+    # Remove trailing / if it's there and ensure /summary/ path
+    base_url = base_url.rstrip("/") + "/summary/"
 
     data = {"text": args["text"]}
     if args.get("max_length"):
         data["max_length"] = args["max_length"]
 
-    with httpx.Client(timeout=30) as client:
+    with _http_client("summary") as client:
         resp = client.post(
             base_url,
             json=data,
             headers={"Content-Type": "application/json"},
         )
         if resp.status_code != 200:
-            return json.dumps({"error": f"HTTP {resp.status_code}", "detail": resp.text[:500]})
+            return json.dumps({
+                "error": f"HTTP {resp.status_code}",
+                "detail": resp.text[:500]
+            })
         return json.dumps(resp.json(), indent=2, ensure_ascii=False)
 
 
 def handle_diarize_audio(args: dict) -> str:
     """Diarization API handler."""
     config = _get_config()
-    base_url = f"{config.services.clean_url(config.services.diarization_base)}/upload-audio/"
+    base_url = config.services.clean_url(config.services.diarization_base)
+    if not base_url.startswith("https://"):
+        base_url = "https://" + base_url
+    base_url = base_url.rstrip("/") + "/upload-audio/"
     key = config.get_llm_api_key()
 
     audio_data = None
@@ -372,26 +410,32 @@ def handle_diarize_audio(args: dict) -> str:
     else:
         return json.dumps({"error": "No audio source provided."})
 
-    with httpx.Client(timeout=120) as client:
+    with _http_client("diarization") as client:
         resp = client.post(
             base_url,
             files={"file": (filename, audio_data)},
             headers={"Authorization": f"Bearer {key}"},
         )
         if resp.status_code not in (200, 201, 202):
-            return json.dumps({"error": f"HTTP {resp.status_code}", "detail": resp.text[:500]})
+            return json.dumps({
+                "error": f"HTTP {resp.status_code}",
+                "detail": resp.text[:500]
+            })
         return json.dumps(resp.json(), indent=2, ensure_ascii=False)
 
 
 def handle_registry_list(args: dict) -> str:
     """Docker registry list handler."""
     config = _get_config()
-    host = config.services.registry_host() + ":443"
+    host = config.services.registry_host()
 
     credentials = f"{config.creds.registry_user}:{config.creds.registry_password}"
     auth_header = base64.b64encode(credentials.encode()).decode()
 
-    with httpx.Client(timeout=30) as client:
+    if not config.creds.registry_password:
+        return json.dumps({"error": "Registry password not configured."})
+
+    with _http_client("registry") as client:
         params = {"n": args.get("n", 0)}
         if args.get("last"):
             params["last"] = args["last"]
@@ -400,16 +444,21 @@ def handle_registry_list(args: dict) -> str:
             f"https://{host}/v2/_catalog",
             params=params,
             headers={"Authorization": f"Basic {auth_header}"},
-            verify=True,
         )
         if resp.status_code != 200:
-            return json.dumps({"error": f"HTTP {resp.status_code}", "detail": resp.text[:500]})
+            return json.dumps({
+                "error": f"HTTP {resp.status_code}",
+                "detail": resp.text[:500]
+            })
         return json.dumps(resp.json(), indent=2, ensure_ascii=False)
 
 
 def handle_s3_list(args: dict) -> str:
     """S3 list handler."""
     config = _get_config()
+
+    if not config.creds.s3_access_key or not config.creds.s3_secret_key:
+        return json.dumps({"error": "S3 credentials not configured. Set INFOCEPO_S3_ACCESS_KEY and INFOCEPO_S3_SECRET_KEY."})
 
     s3 = boto3.client(
         "s3",
@@ -437,6 +486,9 @@ def handle_s3_upload(args: dict) -> str:
     """S3 upload handler."""
     config = _get_config()
 
+    if not config.creds.s3_access_key or not config.creds.s3_secret_key:
+        return json.dumps({"error": "S3 credentials not configured."})
+
     s3 = boto3.client(
         "s3",
         endpoint_url=config.services.s3_endpoint_url(),
@@ -454,6 +506,9 @@ def handle_s3_upload(args: dict) -> str:
 def handle_s3_download(args: dict) -> str:
     """S3 download handler."""
     config = _get_config()
+
+    if not config.creds.s3_access_key or not config.creds.s3_secret_key:
+        return json.dumps({"error": "S3 credentials not configured."})
 
     s3 = boto3.client(
         "s3",

@@ -15,7 +15,6 @@ from mcp.types import (
     TextContent,
     ImageContent,
     EmbeddedResource,
-    TextResourceContents,
 )
 from mcp.server.stdio import stdio_server
 
@@ -55,9 +54,7 @@ def handle_tool_call(name: str, arguments: dict) -> list:
             return [TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
 
         elif name == "infra_refresh_discovery":
-            # Clear cache
             wiki_fetcher.cache_dir.mkdir(parents=True, exist_ok=True)
-            import glob
             import time
             now = time.time()
             for f in wiki_fetcher.cache_dir.glob("*.txt"):
@@ -96,45 +93,43 @@ def handle_tool_call(name: str, arguments: dict) -> list:
 
         # === TTS tools ===
         elif name == "tts_speech":
-            result = handle_tts_speech(arguments)
-            parsed = json.loads(result) if isinstance(result, str) else result
+            result_raw = handle_tts_speech(arguments)
+            parsed = json.loads(result_raw) if isinstance(result_raw, str) else result_raw
             if "audio_path" in parsed:
-                # Return audio as embedded resource
                 with open(parsed["audio_path"], "rb") as f:
                     audio_data = f.read()
                 return [
                     EmbeddedResource(
                         type="resource",
                         resource={
-                            "mimeType": f"audio/opus",
+                            "mimeType": "audio/opus",
                             "uri": f"file://{parsed['audio_path']}",
-                            "blob": audio_data.hex(),  # MCP expects blob as hex or base64... actually it should be bytes in some implementations
+                            "blob": audio_data.hex(),
                         }
                     ),
-                    TextContent(type="text", text=result),
+                    TextContent(type="text", text=result_raw),
                 ]
-            return [TextContent(type="text", text=result)]
+            return [TextContent(type="text", text=result_raw)]
 
         # === Image tools ===
         elif name == "image_generate":
-            result = handle_image_generate(arguments)
-            parsed = json.loads(result) if isinstance(result, str) else result
-            content = [TextContent(type="text", text=result)]
-            # Also return images if present
+            result_raw = handle_image_generate(arguments)
+            parsed = json.loads(result_raw) if isinstance(result_raw, str) else result_raw
+            content_items = [TextContent(type="text", text=result_raw)]
             if "data" in parsed:
                 for item in parsed["data"]:
                     if "saved_to" in item:
                         try:
                             with open(item["saved_to"], "rb") as f:
                                 img_data = f.read()
-                            content.append(ImageContent(
+                            content_items.append(ImageContent(
                                 type="image",
                                 data=img_data.hex(),
-                                mimeType="image/png",
+                                mime_type="image/png",
                             ))
                         except Exception:
                             pass
-            return content
+            return content_items
 
         # === Embedding tools ===
         elif name == "embeddings_create":
@@ -190,28 +185,43 @@ def handle_tool_call(name: str, arguments: dict) -> list:
         return [TextContent(type="text", text=json.dumps({"error": str(e), "traceback": traceback.format_exc()[:1000]}))]
 
 
+async def on_list_tools(context, params):
+    """List available tools for MCP."""
+    from mcp.types import ListToolsResult
+    return ListToolsResult(tools=list_tools())
+
+
+async def on_call_tool(context, params):
+    """Handle a tool call."""
+    name = params.name if hasattr(params, 'name') else params.get('name', '')
+    arguments = params.arguments if hasattr(params, 'arguments') else params.get('arguments', {})
+    content = handle_tool_call(name, arguments)
+    return CallToolResult(content=content)
+
+
 async def run():
     """Main MCP server entrypoint."""
-    app = Server("infocepo-infra-mcp")
-
-    @app.list_tools()
-    async def list_tools_handler() -> ListToolsResult:
-        return ListToolsResult(tools=list_tools())
-
-    @app.call_tool()
-    async def call_tool_handler(name: str, arguments: dict) -> list:
-        content = handle_tool_call(name, arguments)
-        return content
+    app = Server(
+        "infocepo-infra-mcp",
+        version="0.1.0",
+        on_list_tools=on_list_tools,
+        on_call_tool=on_call_tool,
+    )
 
     async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream)
+        from mcp.server.models import InitializationOptions
+        init_opts = InitializationOptions(
+            server_name=app.name,
+            server_version=app.version,
+            capabilities=app.get_capabilities(),
+        )
+        await app.run(read_stream, write_stream, init_opts)
 
 
 def main():
     """Entry point."""
     print("infocepo-infra-mcp v0.1.0 starting...", file=sys.stderr)
 
-    # Handle SIGTERM for clean shutdown
     def signal_handler(sig, frame):
         print("Shutting down...", file=sys.stderr)
         sys.exit(0)
