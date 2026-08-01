@@ -39,20 +39,17 @@ export INFOCEPO_CREDENTIALS_FILE=/path/to/credentials.json
 
 ## Configuration MCP client
 
-Pour Hermes (config.yaml) :
+Pour Hermes (config.yaml), utiliser le wrapper `run-server.sh` :
 
 ```yaml
 mcp_servers:
   infocepo-infra:
-    command: /home/ai-agent/work/infocepo-infra-mcp/.venv/bin/python
-    args:
-      - -m
-      - infocepo_mcp.server
-    env:
-      PYTHONPATH: /home/ai-agent/work/infocepo-infra-mcp/src
-      INFOCEPO_API_KEY: sk-...
+    command: /path/to/infocepo-infra-mcp/run-server.sh
+    env: {}
     timeout: 60
 ```
+
+Le script lit la clé API depuis `~/.infocepo-credentials` puis via la variable `INFOCEPO_API_KEY`.
 
 ## Outils disponibles
 
