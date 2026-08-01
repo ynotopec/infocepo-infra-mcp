@@ -37,19 +37,36 @@ export INFOCEPO_REGISTRY_PASSWORD=...
 export INFOCEPO_CREDENTIALS_FILE=/path/to/credentials.json
 ```
 
-## Configuration MCP client
+## Configuration client
 
-Pour Hermes (config.yaml), utiliser le wrapper `run-server.sh` :
+Le serveur s'exécute en **stdio** (standard MCP) — compatible avec **tout client MCP** :
 
-```yaml
-mcp_servers:
-  infocepo-infra:
-    command: /path/to/infocepo-infra-mcp/run-server.sh
-    env: {}
-    timeout: 60
+```bash
+/path/to/infocepo-infra-mcp/run-server.sh
 ```
 
-Le script lit la clé API depuis `~/.infocepo-credentials` puis via la variable `INFOCEPO_API_KEY`.
+La clé API est lue automatiquement depuis `~/.infocepo-credentials` ou la variable `INFOCEPO_API_KEY`.
+
+### Exemples d'intégration
+
+**Claude Desktop** (`claude_desktop_config.json`) :
+```json
+{
+  "mcpServers": {
+    "infocepo-infra": {
+      "command": "/path/to/infocepo-infra-mcp/run-server.sh",
+      "env": {}
+    }
+  }
+}
+```
+
+**Open WebUI** — plugin MCP stdio :
+```bash
+/path/to/infocepo-infra-mcp/run-server.sh
+```
+
+**VS Code / Cursor** — extensions MCP supportent stdio nativement.
 
 ## Outils disponibles
 
