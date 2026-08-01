@@ -1,0 +1,142 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: infocepo-mcp-credentials
+  namespace: demo1
+type: Opaque
+stringData:
+  INFOCEPO_API_KEY: "{{.values.api_key}}"
+  INFOCEPO_CHROMA_TOKEN: "{{.values.chroma_token}}"
+  INFOCEPO_S3_ACCESS_KEY: "{{.values.s3_access_key}}"
+  INFOCEPO_S3_SECRET_KEY: "{{.values.s3_secret_key}}"
+  INFOCEPO_REGISTRY_USER: "{{.values.registry_user}}"
+  INFOCEPO_REGISTRY_PASSWORD: "{{.values.registry_password}}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infocepo-mcp-server
+  namespace: demo1
+  labels:
+    app: infocepo-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infocepo-mcp
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: infocepo-mcp
+    spec:
+      containers:
+        - name: mcp-server
+          image: registry.ailab.infocepo.com:wait-2026-09/infocepo-mcp:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8085
+              name: http-mcp
+              protocol: TCP
+          env:
+            - name: MCP_HOST
+              value: "0.0.0.0"
+            - name: MCP_PORT
+              value: "8085"
+            - name: INFOCEPO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: infocepo-mcp-credentials
+                  key: INFOCEPO_API_KEY
+            - name: INFOCEPO_CHROMA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: infocepo-mcp-credentials
+                  key: INFOCEPO_CHROMA_TOKEN
+            - name: INFOCEPO_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: infocepo-mcp-credentials
+                  key: INFOCEPO_S3_ACCESS_KEY
+            - name: INFOCEPO_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: infocepo-mcp-credentials
+                  key: INFOCEPO_S3_SECRET_KEY
+            - name: INFOCEPO_REGISTRY_USER
+              valueFrom:
+                secretKeyRef:
+                  name: infocepo-mcp-credentials
+                  key: INFOCEPO_REGISTRY_USER
+            - name: INFOCEPO_REGISTRY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: infocepo-mcp-credentials
+                  key: INFOCEPO_REGISTRY_PASSWORD
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8085
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              pod: 8085
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infocepo-mcp-server
+  namespace: demo1
+  labels:
+    app: infocepo-mcp
+spec:
+  selector:
+    app: infocepo-mcp
+  ports:
+    - port: 8085
+      targetPort: 8085
+      name: http-mcp
+      protocol: TCP
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: infocepo-mcp-ingress
+  namespace: demo1
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: public
+  tls:
+    - hosts:
+        - mcp.infocepo.com
+      secretName: mcp-infocepo-com-tls
+  rules:
+    - host: mcp.infocepo.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: infocepo-mcp-server
+                port:
+                  number: 8085
