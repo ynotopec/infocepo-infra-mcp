@@ -39,8 +39,8 @@ Environnements :
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  MCP Client (Claude, Hermes, Codex, etc.)        │
-│  Tool-use: llm_chat(), stt_transcribe(), tts()   │
+│  MCP Client (Claude, VS Code, WebUI, etc.)      │
+│  Tool-use: llm_chat(), stt_transcribe(), tts()  │
 └──────────┬──────────────────────────────────────┘
            │ JSON-RPC over stdio
            ▼

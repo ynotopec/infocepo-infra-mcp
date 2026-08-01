@@ -42,7 +42,7 @@ export INFOCEPO_CREDENTIALS_FILE=/path/to/credentials.json
 Le serveur s'exécute en **stdio** (standard MCP) — compatible avec **tout client MCP** :
 
 ```bash
-/path/to/infocepo-infra-mcp/run-server.sh
+python3 -m infocepo_mcp.server
 ```
 
 La clé API est lue automatiquement depuis `~/.infocepo-credentials` ou la variable `INFOCEPO_API_KEY`.
@@ -54,8 +54,11 @@ La clé API est lue automatiquement depuis `~/.infocepo-credentials` ou la varia
 {
   "mcpServers": {
     "infocepo-infra": {
-      "command": "/path/to/infocepo-infra-mcp/run-server.sh",
-      "env": {}
+      "command": "python3",
+      "args": ["-m", "infocepo_mcp.server"],
+      "env": {
+        "INFOCEPO_API_KEY": "your-api-key-here"
+      }
     }
   }
 }
@@ -63,7 +66,7 @@ La clé API est lue automatiquement depuis `~/.infocepo-credentials` ou la varia
 
 **Open WebUI** — plugin MCP stdio :
 ```bash
-/path/to/infocepo-infra-mcp/run-server.sh
+python3 -m infocepo_mcp.server
 ```
 
 **VS Code / Cursor** — extensions MCP supportent stdio nativement.
