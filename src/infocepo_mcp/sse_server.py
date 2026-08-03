@@ -1,3 +1,4 @@
+from starlette.middleware.cors import CORSMiddleware
 #!/usr/bin/env python3
 """SSE MCP server for infocepo-infra — MCP v2 API (add_request_handler pattern)."""
 
@@ -422,7 +423,7 @@ async def messages_handler(scope, receive, send):
 
 
 # ============================================================================
-# Middleware: log raw requests before validation
+# Middleware: CORS headers
 # ============================================================================
 
 async def debug_middleware(scope, receive, send):
@@ -509,4 +510,7 @@ if __name__ == "__main__":
 
     print(f"Starting infocepo-infra MCP SSE server on {host}:{port}", file=sys.stderr)
 
-    uvicorn.run(router, host=host, port=port, log_level="info")
+    # Create app with CORS middleware
+from starlette.middleware import Middleware
+app = CORSMiddleware(app=router, allow_origins=["*"])
+uvicorn.run(app, host=host, port=port, log_level="info")
