@@ -433,8 +433,8 @@ async def openapi_handler(scope, receive, send):
                         "application/json": {
                             "schema": {
                                 "type": "object",
-                            "properties": getattr(tool, "inputSchema", {}).get("properties", {}),
-                            "required": getattr(tool, "inputSchema", {}).get("required", []),
+                                "properties": getattr(tool, "inputSchema", {}).get("properties", {}),
+                                "required": getattr(tool, "inputSchema", {}).get("required", []),
                                 "additionalProperties": True
                             }
                         }
@@ -449,6 +449,13 @@ async def openapi_handler(scope, receive, send):
         }
     
     resp = JSONResponse(openapi_spec)
+    await resp(scope, receive, send)
+
+
+# OpenAPI endpoint that also responds to /sse/openapi.json (OpenWebUI probe)
+async def openapi_probe_handler(scope, receive, send):
+    from starlette.responses import RedirectResponse
+    resp = RedirectResponse(url="/openapi.json", status_code=307)
     await resp(scope, receive, send)
 
 
@@ -522,6 +529,8 @@ async def router(scope, receive, send):
         return
     if scope["method"] == "GET" and scope["path"] == "/openapi.json":
         await openapi_handler(scope, receive, send)
+    elif scope["method"] == "GET" and scope["path"] == "/sse/openapi.json":
+        await openapi_probe_handler(scope, receive, send)
     elif scope["method"] == "GET" and scope["path"] == "/sse":
         await sse_handler(scope, receive, send)
     elif scope["method"] == "POST" and scope["path"].startswith("/messages"):
