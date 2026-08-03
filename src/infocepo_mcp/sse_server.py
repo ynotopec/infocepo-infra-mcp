@@ -292,6 +292,170 @@ _MCP_TOOLS: list[Tool] = [
     ),
 ]
 
+# OpenAPI-compatible schemas (MCP SDK v2 overwrites Tool.inputSchema to None)
+_TOOL_SCHEMAS = {
+    "infra_list_services": {
+        "type": "object",
+        "properties": {
+            "include_status": {
+                "type": "boolean",
+                "description": "Include health check status (requires HTTP call)"
+            },
+            "env": {
+                "type": "string",
+                "description": "Environment to show endpoints for: prod, lab, dev",
+                "enum": ["prod", "lab", "dev"],
+                "default": "prod"
+            }
+        }
+    },
+    "infra_refresh_discovery": {"type": "object", "properties": {}},
+    "infra_read_wiki": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Wiki page title (e.g., 'Main_Page', 'Page_Name')"},
+            "section": {"type": "string", "description": "Optional: extract only this section"}
+        },
+        "required": ["title"]
+    },
+    "infra_parse_wiki": {
+        "type": "object",
+        "properties": {"title": {"type": "string", "description": "Wiki page title"}},
+        "required": ["title"]
+    },
+    "llm_chat": {
+        "type": "object",
+        "properties": {
+            "model": {"type": "string", "description": "Model name: ai-default, ai-thinking, ai-fast, ai-embedding, ai-stt, ai-tts, ai-image, ai-vision"},
+            "messages": {"type": "array", "description": "Chat messages array: [{role: 'user'|'system'|'assistant', content: 'text'}]"},
+            "temperature": {"type": "number", "description": "Sampling temperature (0-2). Default 0.7.", "default": 0.7},
+            "max_tokens": {"type": "integer", "description": "Max tokens in response."}
+        },
+        "required": ["messages"]
+    },
+    "llm_vision": {
+        "type": "object",
+        "properties": {
+            "image_url": {"type": "string", "description": "Image URL (http://...) or data:image/... base64"},
+            "image_b64": {"type": "string", "description": "Base64-encoded image content (if no image_url)"},
+            "prompt": {"type": "string", "description": "Question about the image, e.g. 'Describe this image'", "default": "Décris cette image."}
+        },
+        "required": []
+    },
+    "stt_transcribe": {
+        "type": "object",
+        "properties": {
+            "audio_path": {"type": "string", "description": "Local path to audio file (opus, ogg, wav, mp3, m4a)"},
+            "audio_url": {"type": "string", "description": "URL to download audio from"},
+            "audio_b64": {"type": "string", "description": "Base64-encoded audio content"},
+            "model": {"type": "string", "description": "Model name (default: whisper-1)", "default": "whisper-1"},
+            "language": {"type": "string", "description": "Language code (e.g., 'fr', 'en'). Auto-detect if omitted."}
+        }
+    },
+    "tts_speech": {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "Text to synthesize"},
+            "voice": {"type": "string", "description": "Voice name (e.g., 'coral', 'sage'). Default 'coral'.", "default": "coral"},
+            "response_format": {"type": "string", "description": "Output format: opus, mp3, wav, flac, pcm", "default": "opus"},
+            "instructions": {"type": "string", "description": "Voice direction (e.g., 'Speak in a cheerful tone')"}
+        },
+        "required": ["text"]
+    },
+    "image_generate": {
+        "type": "object",
+        "properties": {
+            "prompt": {"type": "string", "description": "Image description prompt"},
+            "n": {"type": "integer", "description": "Number of images to generate", "default": 1},
+            "size": {"type": "string", "description": "Image size (e.g., '1024x1024', '1024x768')", "default": "1024x1024"}
+        },
+        "required": ["prompt"]
+    },
+    "embeddings_create": {
+        "type": "object",
+        "properties": {
+            "texts": {"type": "array", "description": "List of texts to embed", "items": {"type": "string"}},
+            "model": {"type": "string", "description": "Embedding model (default: bge-m3)", "default": "bge-m3"}
+        },
+        "required": ["texts"]
+    },
+    "chromadb_collections": {
+        "type": "object",
+        "properties": {
+            "env": {"type": "string", "description": "Environment: prod (default), lab", "enum": ["prod", "lab"]}
+        }
+    },
+    "chromadb_search": {
+        "type": "object",
+        "properties": {
+            "collection": {"type": "string", "description": "Collection name to search in"},
+            "query": {"type": "string", "description": "Search query (text, not vector — will be embedded automatically)"},
+            "n_results": {"type": "integer", "description": "Number of results to return", "default": 5},
+            "env": {"type": "string", "description": "Environment: prod (default), lab", "enum": ["prod", "lab"]}
+        },
+        "required": ["collection", "query"]
+    },
+    "chromadb_upsert": {
+        "type": "object",
+        "properties": {
+            "collection": {"type": "string", "description": "Collection name (created if it doesn't exist)"},
+            "documents": {"type": "array", "description": "List of text documents to store", "items": {"type": "string"}},
+            "metadatas": {"type": "array", "description": "List of metadata dicts for each document", "items": {"type": "object"}},
+            "ids": {"type": "array", "description": "List of unique IDs for each document", "items": {"type": "string"}},
+            "env": {"type": "string", "description": "Environment: prod (default), lab", "enum": ["prod", "lab"]}
+        },
+        "required": ["collection", "documents", "ids"]
+    },
+    "summary_text": {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "Text to summarize"},
+            "max_length": {"type": "integer", "description": "Max summary length in characters"}
+        },
+        "required": ["text"]
+    },
+    "diarize_audio": {
+        "type": "object",
+        "properties": {
+            "audio_path": {"type": "string", "description": "Local path to audio file (mp3, wav, etc.)"},
+            "audio_url": {"type": "string", "description": "URL to download audio from"}
+        }
+    },
+    "registry_list": {
+        "type": "object",
+        "properties": {
+            "n": {"type": "integer", "description": "Number of results (for pagination)", "default": 0},
+            "last": {"type": "string", "description": "Name of last entry for pagination"}
+        }
+    },
+    "s3_list": {
+        "type": "object",
+        "properties": {
+            "bucket": {"type": "string", "description": "Bucket name (e.g., 'ORG')"},
+            "prefix": {"type": "string", "description": "Optional prefix/filter"}
+        },
+        "required": ["bucket"]
+    },
+    "s3_upload": {
+        "type": "object",
+        "properties": {
+            "bucket": {"type": "string", "description": "Bucket name"},
+            "key": {"type": "string", "description": "Object key (path in bucket)"},
+            "file_path": {"type": "string", "description": "Local file path to upload"}
+        },
+        "required": ["bucket", "key", "file_path"]
+    },
+    "s3_download": {
+        "type": "object",
+        "properties": {
+            "bucket": {"type": "string", "description": "Bucket name"},
+            "key": {"type": "string", "description": "Object key (path in bucket)"},
+            "save_path": {"type": "string", "description": "Local path to save the file"}
+        },
+        "required": ["bucket", "key", "save_path"]
+    },
+}
+
 # ============================================================================
 # Tool handler dispatch
 # ============================================================================
@@ -423,6 +587,7 @@ async def openapi_handler(scope, receive, send):
     
     for tool in _MCP_TOOLS:
         tool_name = tool.name
+        schema = _TOOL_SCHEMAS.get(tool_name, {"type": "object", "properties": {}})
         openapi_spec["paths"][f"/tools/{tool_name}"] = {
             "post": {
                 "operationId": f"call_{tool_name}",
@@ -432,9 +597,9 @@ async def openapi_handler(scope, receive, send):
                     "content": {
                         "application/json": {
                             "schema": {
-                                "type": "object",
-                                "properties": getattr(tool, "inputSchema", {}).get("properties", {}),
-                                "required": getattr(tool, "inputSchema", {}).get("required", []),
+                                "type": schema.get("type", "object"),
+                                "properties": schema.get("properties", {}),
+                                "required": schema.get("required", []),
                                 "additionalProperties": True
                             }
                         }
