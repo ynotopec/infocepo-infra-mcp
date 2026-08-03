@@ -407,7 +407,7 @@ mcp_app.add_request_handler("tools/call", CallToolRequestParams, _call_tool_hand
 # ASGI Routing
 # ============================================================================
 
-sse = SseServerTransport("/messages/")
+sse = SseServerTransport("/messages")
 
 
 async def sse_handler(scope, receive, send):
