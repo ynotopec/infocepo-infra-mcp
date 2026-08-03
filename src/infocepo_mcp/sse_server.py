@@ -377,21 +377,12 @@ async def _call_tool_handler(context, params):
     containing the actual CallToolRequestParams (name, arguments).
     """
     try:
-        import sys as _sys
-        # DEBUG: log what we received
-        print(f"[DEBUG] handler params type: {type(params)}", file=_sys.stderr, flush=True)
-        print(f"[DEBUG] params attrs: {dir(params)}", file=_sys.stderr, flush=True)
         if hasattr(params, "params"):
-            ap = params.params
-            print(f"[DEBUG] params.params type: {type(ap)}", file=_sys.stderr, flush=True)
-            print(f"[DEBUG] params.params: {ap}", file=_sys.stderr, flush=True)
-            name = getattr(ap, "name", "")
-            arguments = getattr(ap, "arguments", {}) or {}
+            name = getattr(params.params, "name", "")
+            arguments = getattr(params.params, "arguments", {}) or {}
         else:
-            print(f"[DEBUG] no .params attr, reading directly", file=_sys.stderr, flush=True)
             name = getattr(params, "name", "")
             arguments = getattr(params, "arguments", {}) or {}
-        print(f"[DEBUG] extracted name={name}, args={arguments}", file=_sys.stderr, flush=True)
         result_text = await _handle_tool_call(name, arguments)
         from mcp.types import CallToolResult
         return CallToolResult(content=[TextContent(type="text", text=result_text)])
