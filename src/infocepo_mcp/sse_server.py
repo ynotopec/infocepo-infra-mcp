@@ -18,6 +18,7 @@ from mcp.types import (
     Tool, TextContent, ErrorData,
     # Request types
     ListToolsRequest, CallToolRequest,
+    CallToolRequestParams,
 )
 
 from infocepo_mcp.services import (
@@ -376,15 +377,21 @@ async def _call_tool_handler(context, params):
     containing the actual CallToolRequestParams (name, arguments).
     """
     try:
-        # params is CallToolRequest, not CallToolRequestParams
-        actual_params = getattr(params, "params", None)
-        if actual_params is not None:
-            name = getattr(actual_params, "name", "")
-            arguments = getattr(actual_params, "arguments", {}) or {}
+        import sys as _sys
+        # DEBUG: log what we received
+        print(f"[DEBUG] handler params type: {type(params)}", file=_sys.stderr, flush=True)
+        print(f"[DEBUG] params attrs: {dir(params)}", file=_sys.stderr, flush=True)
+        if hasattr(params, "params"):
+            ap = params.params
+            print(f"[DEBUG] params.params type: {type(ap)}", file=_sys.stderr, flush=True)
+            print(f"[DEBUG] params.params: {ap}", file=_sys.stderr, flush=True)
+            name = getattr(ap, "name", "")
+            arguments = getattr(ap, "arguments", {}) or {}
         else:
-            # Fallback if params_type is directly CallToolRequestParams
+            print(f"[DEBUG] no .params attr, reading directly", file=_sys.stderr, flush=True)
             name = getattr(params, "name", "")
             arguments = getattr(params, "arguments", {}) or {}
+        print(f"[DEBUG] extracted name={name}, args={arguments}", file=_sys.stderr, flush=True)
         result_text = await _handle_tool_call(name, arguments)
         from mcp.types import CallToolResult
         return CallToolResult(content=[TextContent(type="text", text=result_text)])
@@ -398,8 +405,11 @@ async def _call_tool_handler(context, params):
 
 
 # Register request handlers
+# In MCP v2, params_type is the Pydantic model to validate the params body against,
+# NOT the full request. The params body is: {"name":..., "arguments":...} for tools/call
+# and {"pagination":...} for tools/list
 mcp_app.add_request_handler("tools/list", ListToolsRequest, _list_tools_handler)
-mcp_app.add_request_handler("tools/call", CallToolRequest, _call_tool_handler)
+mcp_app.add_request_handler("tools/call", CallToolRequestParams, _call_tool_handler)
 
 
 # ============================================================================
@@ -420,6 +430,41 @@ async def messages_handler(scope, receive, send):
     return await sse.handle_post_message(scope=scope, receive=receive, send=send)
 
 
+# ============================================================================
+# Middleware: log raw requests before validation
+# ============================================================================
+
+async def debug_middleware(scope, receive, send):
+    if scope["type"] != "http" or not scope.get("path", "").startswith("/messages"):
+        return await not_found(scope, receive, send)
+    
+    import asyncio
+    body = b""
+    while True:
+        try:
+            msg = await asyncio.wait_for(receive(), timeout=1.0)
+            body += msg.get("body", b"")
+            if not msg.get("more_body", False):
+                break
+        except asyncio.TimeoutError:
+            break
+    
+    print(f"[DEBUG RAW] Body: {body.decode()[:1000]}", file=sys.stderr, flush=True)
+    
+    # Put the body back by wrapping receive
+    body_data = body
+    async def wrapped_receive():
+        nonlocal body_data
+        if body_data:
+            first = {"type": "http.request", "body": body_data, "more_body": False}
+            body_data = b""
+            return first
+        return await receive()
+    
+    # Now call the actual handler
+    await messages_handler(scope, wrapped_receive, send)
+
+
 async def health_handler(scope, receive, send):
     from starlette.responses import JSONResponse
     resp = JSONResponse({"status": "ok", "server": "infocepo-infra-mcp", "version": "0.1.0", "tools": len(_MCP_TOOLS)})
@@ -438,7 +483,18 @@ async def router(scope, receive, send):
     if scope["method"] == "GET" and scope["path"] == "/sse":
         await sse_handler(scope, receive, send)
     elif scope["method"] == "POST" and scope["path"].startswith("/messages"):
-        await messages_handler(scope, receive, send)
+        await debug_middleware(scope, receive, send)
+    elif scope["method"] == "POST" and scope["path"] == "/debug/body":
+        body = b""
+        while True:
+            msg = await receive()
+            body += msg.get("body", b"")
+            if not msg.get("more_body", False):
+                break
+        print(f"[DEBUG RAW] Body: {body.decode()[:1000]}", file=sys.stderr, flush=True)
+        from starlette.responses import JSONResponse
+        resp = JSONResponse({"captured": body.decode()[:1000], "length": len(body)})
+        await resp(scope, receive, send)
     elif scope["method"] == "GET" and scope["path"] == "/health":
         await health_handler(scope, receive, send)
     else:
@@ -451,6 +507,11 @@ async def router(scope, receive, send):
 
 if __name__ == "__main__":
     import uvicorn
+    import logging
+    logging.getLogger("uvicorn").setLevel(logging.DEBUG)
+    logging.getLogger("mcp.server").setLevel(logging.DEBUG)
+    logging.getLogger("mcp.shared").setLevel(logging.DEBUG)
+    logging.getLogger("sse").setLevel(logging.DEBUG)
 
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8085"))
