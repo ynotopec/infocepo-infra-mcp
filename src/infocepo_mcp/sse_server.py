@@ -372,8 +372,9 @@ async def _list_tools_handler(context, params):
 async def _call_tool_handler(context, params):
     """Handler for tools/call request."""
     try:
-        name = params.get("name", "")
-        arguments = params.get("arguments", {}) if params else {}
+        # MCP v2: params is a Pydantic CallToolRequestParams object (no .get())
+        name = getattr(params, "name", "")
+        arguments = getattr(params, "arguments", {}) or {}
         result_text = await _handle_tool_call(name, arguments)
         from mcp.types import CallToolResult
         return CallToolResult(content=[TextContent(type="text", text=result_text)])
