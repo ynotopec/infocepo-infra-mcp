@@ -166,7 +166,14 @@ class WikiFetcher:
                 "url": f"https://{url}",
                 "raw": url,
             })
-        return list(set(endpoints))
+        # Deduplicate by URL string (dicts are not hashable)
+        seen_urls = set()
+        deduped = []
+        for ep in endpoints:
+            if ep["url"] not in seen_urls:
+                seen_urls.add(ep["url"])
+                deduped.append(ep)
+        return deduped
 
     def get_section(self, title: str, section_name: str) -> Optional[str]:
         """Get a specific section from a wiki page."""
