@@ -384,7 +384,7 @@ async def _call_tool_handler(context, params):
             name = getattr(params, "name", "")
             arguments = getattr(params, "arguments", {}) or {}
         result_text = await _handle_tool_call(name, arguments)
-        from mcp.types import CallToolResult
+        from mcp.types import CallToolResult, TextContent
         return CallToolResult(content=[TextContent(type="text", text=result_text)])
     except Exception as e:
         import traceback
