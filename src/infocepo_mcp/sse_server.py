@@ -405,6 +405,54 @@ mcp_app.add_request_handler("tools/call", CallToolRequestParams, _call_tool_hand
 
 
 # ============================================================================
+# OpenAPI endpoint for OpenWebUI External Tool Servers
+# ============================================================================
+
+async def openapi_handler(scope, receive, send):
+    from starlette.responses import JSONResponse
+    
+    openapi_spec = {
+        "openapi": "3.0.0",
+        "info": {
+            "title": "infocepo-infra MCP Server",
+            "version": "0.1.0",
+            "description": "MCP tools for infocepo infrastructure"
+        },
+        "paths": {}
+    }
+    
+    for tool in _MCP_TOOLS:
+        tool_name = tool.name
+        openapi_spec["paths"][f"/tools/{tool_name}"] = {
+            "post": {
+                "operationId": f"call_{tool_name}",
+                "summary": tool.description,
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                            "properties": getattr(tool, "inputSchema", {}).get("properties", {}),
+                            "required": getattr(tool, "inputSchema", {}).get("required", []),
+                                "additionalProperties": True
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Tool execution result"
+                    }
+                }
+            }
+        }
+    
+    resp = JSONResponse(openapi_spec)
+    await resp(scope, receive, send)
+
+
+# ============================================================================
 # ASGI Routing
 # ============================================================================
 
@@ -472,7 +520,9 @@ async def not_found(scope, receive, send):
 async def router(scope, receive, send):
     if scope["type"] != "http":
         return
-    if scope["method"] == "GET" and scope["path"] == "/sse":
+    if scope["method"] == "GET" and scope["path"] == "/openapi.json":
+        await openapi_handler(scope, receive, send)
+    elif scope["method"] == "GET" and scope["path"] == "/sse":
         await sse_handler(scope, receive, send)
     elif scope["method"] == "POST" and scope["path"].startswith("/messages"):
         await debug_middleware(scope, receive, send)
