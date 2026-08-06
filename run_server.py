@@ -226,30 +226,95 @@ async def call_tool(name, arguments):
     
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
+def generate_openapi_spec():
+    """Generate OpenAPI spec from MCP tools."""
+    spec = {
+        "openapi": "3.0.3",
+        "info": {
+            "title": "infocepo-infra MCP Tools",
+            "version": "0.1.0",
+            "description": "MCP tools exposed as an OpenAPI-compatible interface for External Tool Servers.",
+        },
+        "servers": [{"url": "/"}],
+        "paths": {},
+    }
+    for tool in _MCP_TOOLS:
+        tool_name = tool.name
+        spec["paths"][f"/call/{tool_name}"] = {
+            "post": {
+                "summary": tool.description,
+                "operationId": f"call_{tool_name}",
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": f"#/components/schemas/{tool_name}_input"}
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Tool execution result",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "content": {
+                                            "type": "array",
+                                            "items": {"type": "object"},
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        # Add schema for input
+        try:
+            tool_dict = tool.model_dump()
+            schema_def = tool_dict.get("inputSchema")
+            if schema_def and schema_def.get("properties"):
+                spec["components"] = spec.get("components", {})
+                spec["components"]["schemas"] = spec["components"].get("schemas", {})
+                spec["components"]["schemas"][f"{tool_name}_input"] = schema_def
+        except Exception:
+            pass
+    return spec
+
+
 async def run_sse_server():
     import uvicorn
     from starlette.applications import Starlette
-    from starlette.routing import Route
+    from starlette.routing import Route, Mount
     from starlette.middleware import Middleware
     from starlette.middleware.cors import CORSMiddleware
-    
+    from starlette.responses import JSONResponse
+
     sse = SseServerTransport("/messages/")
-    
-    async def handle_sse(scope):
+
+    async def sse_endpoint(request):
+        """Handle SSE connections - the MCP protocol endpoint."""
         async with sse.connect_sse(
-            scope,
-            lambda: asyncio.create_task(sse.receive_message()),
-            lambda msg: asyncio.create_task(sse.send_message(msg))
+            request.scope, request.receive, request._send
         ) as streams:
             await mcp_app.run(
                 streams[0],
                 streams[1],
                 mcp_app.create_initialization_options()
             )
-    
+        from starlette.responses import Response
+        return Response()
+
     async def health_check(request):
-        return {"status": "ok", "server": "infocepo-infra-mcp", "version": "0.1.0", "tools": len(_MCP_TOOLS)}
-    
+        return JSONResponse({"status": "ok", "server": "infocepo-infra-mcp", "version": "0.1.0", "tools": len(_MCP_TOOLS)})
+
+    async def openapi_handler(request):
+        """Return OpenAPI spec for External Tool Servers compatibility."""
+        return JSONResponse(generate_openapi_spec())
+
     app = Starlette(
         middleware=[
             Middleware(
@@ -260,15 +325,16 @@ async def run_sse_server():
             )
         ],
         routes=[
-            Route("/sse", endpoint=handle_sse),
-            Route("/messages/{path:path}", endpoint=handle_sse),
+            Route("/sse", endpoint=sse_endpoint, methods=["GET"]),
+            Mount("/messages/", app=sse.handle_post_message),
             Route("/health", endpoint=health_check),
+            Route("/openapi.json", endpoint=openapi_handler, methods=["GET"]),
         ],
     )
-    
+
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8085"))
-    
+
     print(f"Starting MCP SSE server on {host}:{port}")
     uvicorn.run(app, host=host, port=port)
 

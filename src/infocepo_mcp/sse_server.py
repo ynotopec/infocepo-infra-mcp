@@ -526,46 +526,30 @@ async def _handle_tool_call(name: str, arguments: dict) -> str:
 
 
 # ============================================================================
-# MCP v2 handler registration
+# MCP handler registration (decorator pattern, MCP v2)
 # ============================================================================
 
-async def _list_tools_handler(context, params):
-    """Handler for tools/list request."""
-    from mcp.types import ListToolsResult
-    return ListToolsResult(tools=_MCP_TOOLS)
+@mcp_app.list_tools()
+async def list_tools():
+    """Return the list of available MCP tools."""
+    return _MCP_TOOLS
 
 
-async def _call_tool_handler(context, params):
-    """Handler for tools/call request.
-    
-    MCP v2: params is a Pydantic CallToolRequest with a .params attribute
-    containing the actual CallToolRequestParams (name, arguments).
-    """
+@mcp_app.call_tool()
+async def call_tool(name: str, arguments: dict = None):
+    """Handle a tool call."""
+    import traceback as tb_module
     try:
-        if hasattr(params, "params"):
-            name = getattr(params.params, "name", "")
-            arguments = getattr(params.params, "arguments", {}) or {}
-        else:
-            name = getattr(params, "name", "")
-            arguments = getattr(params, "arguments", {}) or {}
-        result_text = await _handle_tool_call(name, arguments)
+        args = arguments or {}
+        result_text = await _handle_tool_call(name, args)
         from mcp.types import CallToolResult, TextContent
-        return CallToolResult(content=[TextContent(type="text", text=result_text)])
+        return CallToolResult(content=[TextContent(type="text", text=str(result_text))])
     except Exception as e:
-        import traceback
         from mcp.types import CallToolResult, TextContent
         return CallToolResult(
-            content=[TextContent(type="text", text=json.dumps({"error": str(e), "traceback": traceback.format_exc()[:2000]}))],
+            content=[TextContent(type="text", text=json.dumps({"error": str(e), "traceback": tb_module.format_exc()[:2000]}))],
             isError=True
         )
-
-
-# Register request handlers
-# In MCP v2, params_type is the Pydantic model to validate the params body against,
-# NOT the full request. The params body is: {"name":..., "arguments":...} for tools/call
-# and {"pagination":...} for tools/list
-mcp_app.add_request_handler("tools/list", ListToolsRequest, _list_tools_handler)
-mcp_app.add_request_handler("tools/call", CallToolRequestParams, _call_tool_handler)
 
 
 # ============================================================================

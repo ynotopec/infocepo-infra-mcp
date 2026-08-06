@@ -1,0 +1,19 @@
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: infocepo-mcp-external
+  namespace: demo1
+  labels:
+    kubernetes.io/service-name: infocepo-mcp-external
+addressType: IPv4
+endpoints:
+  - addresses:
+      - "10.0.1.1"
+    conditions:
+      ready: true
+      serving: true
+      terminating: false
+ports:
+  - name: http
+    port: 8085
+    protocol: TCP
