@@ -692,15 +692,29 @@ async def not_found(scope, receive, send):
 async def router(scope, receive, send):
     if scope["type"] != "http":
         return
-    if scope["method"] == "GET" and scope["path"] == "/openapi.json":
+    
+    path = scope.get("path", "")
+    method = scope.get("method", "GET")
+    
+    # Handle CORS preflight (OPTIONS) - respond with CORS headers immediately
+    if method == "OPTIONS":
+        from starlette.responses import Response
+        resp = Response(status_code=204)
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "*"
+        await resp(scope, receive, send)
+        return
+    
+    if method == "GET" and path == "/openapi.json":
         await openapi_handler(scope, receive, send)
-    elif scope["method"] == "GET" and scope["path"] == "/sse/openapi.json":
+    elif method == "GET" and path == "/sse/openapi.json":
         await openapi_probe_handler(scope, receive, send)
-    elif scope["method"] == "GET" and scope["path"] == "/sse":
+    elif method == "GET" and path == "/sse":
         await sse_handler(scope, receive, send)
-    elif scope["method"] == "POST" and scope["path"].startswith("/messages"):
+    elif method == "POST" and path.startswith("/messages"):
         await debug_middleware(scope, receive, send)
-    elif scope["method"] == "POST" and scope["path"] == "/debug/body":
+    elif method == "POST" and path == "/debug/body":
         body = b""
         while True:
             msg = await receive()
@@ -711,7 +725,7 @@ async def router(scope, receive, send):
         from starlette.responses import JSONResponse
         resp = JSONResponse({"captured": body.decode()[:1000], "length": len(body)})
         await resp(scope, receive, send)
-    elif scope["method"] == "GET" and scope["path"] == "/health":
+    elif method == "GET" and path == "/health":
         await health_handler(scope, receive, send)
     else:
         await not_found(scope, receive, send)
