@@ -70,13 +70,14 @@ spec:
               mountPath: /app/config
               readOnly: true
           args:
-            - --config
-            - /app/config/config.json
-            - --hot-reload
+            - --host
+            - 0.0.0.0
             - --port
             - "8000"
-            - --api-key
-            - top-secret-infocepo
+            - --server-type
+            - sse
+            - --
+            - http://host.docker.internal:8085/sse
           resources:
             limits:
               memory: "256Mi"
