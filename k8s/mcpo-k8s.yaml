@@ -63,17 +63,13 @@ spec:
         - name: mcpo
           image: ghcr.io/open-webui/mcpo:main
           ports:
-            - containerPort: 8000
+            - containerPort: 9100
               name: http
-          volumeMounts:
-            - name: config
-              mountPath: /app/config
-              readOnly: true
           args:
             - --host
             - 0.0.0.0
             - --port
-            - "8000"
+            - "9100"
             - --server-type
             - sse
             - --
@@ -113,8 +109,8 @@ spec:
   selector:
     app: mcpo
   ports:
-    - port: 8000
-      targetPort: 8000
+    - port: 9100
+      targetPort: 9100
       name: http
   type: ClusterIP
 ---
