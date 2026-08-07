@@ -14,8 +14,8 @@ spec:
     endpointslice.kubernetes.io/managed-by: staff
     kubernetes.io/service-name: infocepo-mcp-ext
   ports:
-    - port: 8085
-      targetPort: 8085
+    - port: 9100
+      targetPort: 9100
       name: http
       protocol: TCP
   type: ClusterIP

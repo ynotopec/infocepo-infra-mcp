@@ -15,5 +15,5 @@ endpoints:
       terminating: false
 ports:
   - name: http
-    port: 8085
+    port: 9100
     protocol: TCP

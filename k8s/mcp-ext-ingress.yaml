@@ -26,4 +26,4 @@ spec:
               service:
                 name: infocepo-mcp-external
                 port:
-                  number: 8085
+                  number: 9100
