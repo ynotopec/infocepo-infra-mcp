@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "infocepo-infra": {
+      "command": "http",
+      "url": "http://localhost:8085/sse",
+      "serverType": "sse",
+      "headers": {},
+      "timeout": 30
+    }
+  }
+}

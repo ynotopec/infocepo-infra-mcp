@@ -1,0 +1,53 @@
+# =============================================================================
+# Docker Compose — mcpo pour infocepo-infra-mcp
+# =============================================================================
+#
+# Architecture:
+#   MCP Server (systemd, port 8085, 0.0.0.0)
+#     ↓ SSE
+#   mcpo (docker, port 8000, OpenAPI auto-généré)
+#     ↓ OpenAPI
+#   Open WebUI → Settings → Tools → OpenAPI Server
+#     → URL: http://host.docker.internal:8000/openapi.json
+#     → OU via Ingress: https://mcpo.infocepo.com/openapi.json
+#
+# ─── Déploiement ──────────────────────────────────────────────────────────────
+#
+#   docker compose -f docker-compose.mcpo.yml up -d
+#   docker compose -f docker-compose.mcpo.yml logs -f mcpo
+#
+#   mcpo expose:
+#     - OpenAPI JSON:  http://localhost:8000/openapi.json
+#     - Swagger docs:  http://localhost:8000/docs
+#
+# =============================================================================
+
+services:
+  mcpo:
+    image: ghcr.io/open-webui/mcpo:main
+    container_name: infocepo-mcpo
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mcpo-config:/app/config
+    command:
+      - --config
+      - /app/config/config.json
+      - --hot-reload
+      - --port
+      - "8000"
+      - --api-key
+      - "top-secret-infocepo"
+    environment:
+      - HOST_ACCESS=http://host.docker.internal:8085
+      - MCP_SERVER_URL=http://host.docker.internal:8085/sse
+    # Nécessaire pour accéder à host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge

@@ -1,0 +1,145 @@
+# =============================================================================
+# mcpo K8s — Deployment + Service + Ingress
+# =============================================================================
+#
+# Déploie mcpo dans K8s demo1.
+# mcpo se connecte au MCP SSE sur le host via le network K8s.
+#
+# ─── Prereqs ─────────────────────────────────────────────────────────────────
+#
+#   Le MCP SSE doit être accessible depuis les pods K8s.
+#   Si le MCP tourne sur le host à :8085, créer un NodePort ou utiliser un
+#   ExternalIP.
+#
+#   Option A: NodePort (le plus simple)
+#   Option B: Service avec ExternalIP vers le host
+#   Option C: DaemonSet mcpo avec hostNetwork
+#
+# ─── Recommandation ─────────────────────────────────────────────────────────
+#
+#   On utilise une configuration ConfigMap avec le config.json.
+#   mcpo se connecte au MCP via une URL configurable.
+#
+# =============================================================================
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcpo-config
+  namespace: demo1
+data:
+  config.json: |
+    {
+      "mcpServers": {
+        "infocepo-infra": {
+          "command": "http",
+          "url": "http://host.docker.internal:8085/sse",
+          "serverType": "sse",
+          "headers": {},
+          "timeout": 30
+        }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcpo
+  namespace: demo1
+  labels:
+    app: mcpo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcpo
+  template:
+    metadata:
+      labels:
+        app: mcpo
+    spec:
+      containers:
+        - name: mcpo
+          image: ghcr.io/open-webui/mcpo:main
+          ports:
+            - containerPort: 8000
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+          args:
+            - --config
+            - /app/config/config.json
+            - --hot-reload
+            - --port
+            - "8000"
+            - --api-key
+            - top-secret-infocepo
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+          livenessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: mcpo-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcpo
+  namespace: demo1
+  labels:
+    app: mcpo
+spec:
+  selector:
+    app: mcpo
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mcpo-ingress
+  namespace: demo1
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: public
+  tls:
+    - hosts:
+        - mcpo.infocepo.com
+      secretName: mcpo-tls
+  rules:
+    - host: mcpo.infocepo.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mcpo
+                port:
+                  number: 8000

@@ -1,15 +1,15 @@
-# Rapport de Déploiement MCP - Infocepo Infra
+# Rapport de Déploiement - MCP Server systemd + K8s
 
-**Date:** 2026-08-06
-**Repo:** https://github.com/ynotopec/infocepo-infra-mcp
-**Serveur:** https://mcp.ailab.infocepo.com
-**Dashboard OWUI:** https://chat.infocepo.com/admin/users/overview
+**Date:** 2026-08-06  
+**Repo:** https://github.com/ynotopec/infocepo-infra-mcp  
+**Serveur:** https://mcp.ailab.infocepo.com  
+**Dashboard OWUI:** https://chat.infocepo.com
 
 ---
 
 ## 1. Problème Initial
 
-Connexion MCP échouée dans OpenWebUI :
+Erreur de connexion MCP dans OpenWebUI :
 ```
 Failed to connect to https://mcp.ailab.infocepo.com/sse OpenAPI tool server
 ```
@@ -93,12 +93,12 @@ Machine Host (192.168.1.149)
        └── Port 8085 (CORS ✅, OpenAPI ✅, SSE ✅)
 
 Kubernetes Cluster (demo1)
-  ├── EndpointSlice (infocepo-mcp-external) → 192.168.1.149:8085
+  ├── EndpointSlice (infocepo-mcp-external) → 10.0.1.1:8085
   ├── Service (infocepo-mcp-external)
-  └── Ingress (infocepo-mcp-ext-ingress)
+  └── Ingress (infocepo-mcp-external-ingress)
        └── mcp.ailab.infocepo.com → 10.10.0.128
 
-Flow : Client → mcp.ailab.infocepo.com → 10.10.0.128 → 192.168.1.149:8085
+Flow : Client → mcp.ailab.infocepo.com → 10.10.0.128 → 10.0.1.1:8085
 ```
 
 ### 3.2 Service systemd
@@ -131,11 +131,10 @@ systemctl --user start infocepo-mcp.service
 **Statut actuel :**
 ```
 ● infocepo-mcp.service - infocepo-infra MCP Server (systemd user service)
-   Active: active (running) depuis Thu 2026-08-06 14:58:03 CEST
-   Main PID: 1331128 (python3)
-   Memory: 53.2M (peak: 54.0M)
-   Tasks: 1
-   └─1331128 /usr/bin/python3 /home/ai-agent/work/infocepo-infra-mcp/src/infocepo_mcp/sse_server.py
+   Active: active (running) since Thu 2026-08-06 19:06:27 CEST
+   Main PID: 3022 (python3)
+   Memory: ~53M (peak: 54M)
+   └─3022 /usr/bin/python3 /home/ai-agent/work/infocepo-infra-mcp/src/infocepo_mcp/sse_server.py
 ```
 
 ### 3.3 Tests de Validation
@@ -144,16 +143,22 @@ systemctl --user start infocepo-mcp.service
 |----------|----------|--------|
 | `GET /health` | ✅ 200 | `{"status":"ok","server":"infocepo-infra-mcp","version":"0.1.0","tools":19}` |
 | `GET /openapi.json` | ✅ 200 | OpenAPI spec avec 19 tools |
-| `OPTIONS /openapi.json` | ✅ 204 | CORS headers (`Access-Control-Allow-Origin: *`) |
-| `GET /sse` | ✅ 200 | SSE connecte correctement |
-| Connexion K8s → Host | ✅ OPEN | Port 8085 reachable depuis les pods K8s |
-| Ingress → Host | ❌ Échec | Nécessite EndpointSlice admin |
+| `OPTIONS /openapi.json` | ✅ 200 | CORS headers (`Access-Control-Allow-Origin: *`) |
+| `GET /sse` | ✅ 200 | SSE connecte correctement (`event: endpoint`) |
+
+### 3.4 Connectivité Réseau
+
+| Test | Résultat |
+|------|----------|
+| Pod K8s → 10.0.1.1:8085 (loopback microk8s) | ✅ 200 OK |
+| Pod K8s → 192.168.1.149:8085 (IP externe) | ✅ 200 OK |
+| HTTPS mcp.ailab.infocepo.com | ✅ 200 OK |
 
 ---
 
-## 4. Resources K8s Nécessaires
+## 4. Resources K8s Déployées
 
-### 4.1 EndpointSlice (⚠️ Requiert admin K8s)
+### 4.1 EndpointSlice
 
 **Fichier :** `k8s/mcp-external-endpointslice.yaml`
 
@@ -168,7 +173,7 @@ metadata:
 addressType: IPv4
 endpoints:
   - addresses:
-      - "192.168.1.149"
+      - "10.0.1.1"
     conditions:
       ready: true
       serving: true
@@ -179,12 +184,15 @@ ports:
     protocol: TCP
 ```
 
-**Commande :**
+**Commande d'application :**
 ```bash
 kubectl apply -f k8s/mcp-external-endpointslice.yaml
 ```
 
-**Note :** Le namespace `demo1` n'a pas les permissions `endpointslices.discovery.k8s.io`. Nécessite un compte admin ou un RBAC adapté.
+**Statut actuel :**
+- Adresse : `10.0.1.1` (loopback microk8s - le noeud K8s et le host sont sur la même machine)
+- Port : `8085`
+- Conditions : ready=true, serving=true
 
 ### 4.2 Service
 
@@ -210,10 +218,15 @@ spec:
     - "192.168.1.149"
 ```
 
-**Commande :**
+**Commande d'application :**
 ```bash
 kubectl -n demo1 apply -f k8s/mcp-svc.yaml
 ```
+
+**Statut actuel :**
+- ClusterIP : `10.152.183.104`
+- ExternalIPs : `192.168.1.149`
+- Port : `8085/TCP`
 
 ### 4.3 Ingress
 
@@ -223,7 +236,7 @@ kubectl -n demo1 apply -f k8s/mcp-svc.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: infocepo-mcp-ext-ingress
+  name: infocepo-mcp-external-ingress
   namespace: demo1
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
@@ -251,10 +264,16 @@ spec:
                   number: 8085
 ```
 
-**Commande :**
+**Commande d'application :**
 ```bash
 kubectl -n demo1 apply -f k8s/mcp-ext-ingress.yaml
 ```
+
+**Statut actuel :**
+- IngressClass : `public`
+- LoadBalancer IP : `10.10.0.128`
+- Backend : `infocepo-mcp-external:8085`
+- TLS : cert-manager via `letsencrypt-prod`
 
 ---
 
@@ -262,13 +281,8 @@ kubectl -n demo1 apply -f k8s/mcp-ext-ingress.yaml
 
 ### 5.1 Connexion MCP
 
-**URL SSE :** `https://mcp.ailab.infocepo.com/sse`
+**URL SSE :** `https://mcp.ailab.infocepo.com/sse`  
 **URL OpenAPI :** `https://mcp.ailab.infocepo.com/openapi.json`
-
-Dans OWUI :
-1. Aller sur `/admin/users/overview`
-2. Section "External Tools" ou "MCP Servers"
-3. Ajouter le serveur avec l'URL SSE ci-dessus
 
 ### 5.2 19 Tools Disponibles
 
@@ -322,13 +336,13 @@ journalctl --user -u infocepo-mcp.service --since "5 min ago" --no-pager
 ### 6.2 Network Testing from K8s
 ```bash
 # Ping from pod
-kubectl -n demo1 exec <pod-name> -- ping -c 2 192.168.1.149
+kubectl -n demo1 exec <pod-name> -- ping -c 2 10.0.1.1
 
 # Port test
-kubectl -n demo1 exec <pod-name> -- bash -c 'echo > /dev/tcp/192.168.1.149/8085 && echo "OPEN" || echo "CLOSED"'
+kubectl -n demo1 exec <pod-name> -- bash -c 'echo > /dev/tcp/10.0.1.1/8085 && echo "OPEN" || echo "CLOSED"'
 
 # HTTP from pod
-kubectl -n demo1 exec <pod-name> -- curl -sS http://192.168.1.149:8085/health
+kubectl -n demo1 exec <pod-name> -- curl -sS http://10.0.1.1:8085/health
 
 # Via Ingress IP
 kubectl -n demo1 exec <pod-name> -- curl -sS -H "Host: mcp.ailab.infocepo.com" http://10.10.0.128/health
@@ -344,7 +358,7 @@ ufw status verbose
 
 # Route check
 ip route show default
-ip route show 192.168.1.0/24
+ip route show 10.0.1.0/24
 ```
 
 ---
@@ -355,75 +369,59 @@ ip route show 192.168.1.0/24
 - [x] ✅ Code commité et pushé sur GitHub
 - [x] ✅ Service systemd créé et actif
 - [x] ✅ Serveur testé localement (health, openapi, options, sse)
-- [x] ✅ Connectivité K8s → Host vérifiée (port 8085 OPEN)
-- [x] ✅ EndpointSlice créé (en attente de déploiement admin)
-- [ ] ⏳ EndpointSlice déployé (⚠️ nécessite admin K8s)
-- [ ] ⏳ Service déployé (`kubectl -n demo1 apply -f k8s/mcp-svc.yaml`)
-- [ ] ⏳ Ingress déployé (`kubectl -n demo1 apply -f k8s/mcp-ext-ingress.yaml`)
-- [ ] ⏳ Connectivité Ingress → Host vérifiée
-- [ ] ⏳ OWUI configuré avec URL SSE
-- [ ] ⏳ Test de bout en bout : client → OWUI → Ingress → systemd MCP
+- [x] ✅ EndpointSlice créé et déployé (10.0.1.1:8085)
+- [x] ✅ Service créé et déployé (ClusterIP: 10.152.183.104)
+- [x] ✅ Ingress créé et déployé (mcp.ailab.infocepo.com → 10.10.0.128)
+- [x] ✅ Connectivité Ingress → Service → EndpointSlice → systemd MCP
+- [x] ✅ HTTPS fonctionnel avec cert-manager TLS
+- [x] ✅ CORS OPTIONS préflight fonctionnel
+- [x] ✅ SSE connecte correctement
+- [ ] ⏳ OWUI configuré avec URL SSE (à faire manuellement)
+- [ ] ⏳ Test de bout en bout : client → OWUI → MCP (à faire manuellement)
 
 ---
 
-## 8. Prochaines Étapes
+## 8. Architecture Finale
 
-### Priorité 1 : Déploiement K8s (admin requis)
-```bash
-# Appliquer l'EndpointSlice (admin only)
-kubectl apply -f k8s/mcp-external-endpointslice.yaml
-
-# Appliquer le Service
-kubectl -n demo1 apply -f k8s/mcp-svc.yaml
-
-# Appliquer l'Ingress
-kubectl -n demo1 apply -f k8s/mcp-ext-ingress.yaml
-
-# Vérifier
-kubectl -n demo1 get endpointslice infocepo-mcp-external
-kubectl -n demo1 get service infocepo-mcp-external
-kubectl -n demo1 get ingress infocepo-mcp-ext-ingress
-
-# Tester
-curl -sS https://mcp.ailab.infocepo.com/health
+```
+Client HTTPS
+    ↓
+mcp.ailab.infocepo.com
+    ↓
+Nginx Ingress (10.10.0.128)
+    ↓
+Service ClusterIP (10.152.183.104:8085)
+    ↓
+EndpointSlice (10.0.1.1:8085)
+    ↓
+systemd MCP (port 8085) → 19 tools disponibles
 ```
 
-### Priorité 2 : Configuration OWUI
+### Points Clés
+- Le noeud K8s et le host sont sur la même machine physique (`192.168.1.149`)
+- L'EndpointSlice pointe vers `10.0.1.1` (loopback microk8s) pour un accès direct
+- Pas de NAT ni de port forwarding nécessaire
+- Le service systemd est géré en `--user` (pas de privilèges root pour le déploiement)
+
+---
+
+## 9. Prochaines Étapes
+
+### Priorité 1 : Configuration OWUI
 1. Se connecter sur https://chat.infocepo.com/admin/users/overview
 2. Section "External Tools" → "MCP Servers"
 3. Ajouter : `https://mcp.ailab.infocepo.com/sse`
 4. Sauvegarder
 
-### Priorité 3 : Test de bout en bout
+### Priorité 2 : Test de bout en bout
 1. Ouvrir un chat dans OWUI
 2. Taper une commande utilisant un des 19 tools
 3. Vérifier la réponse
 
----
-
-## 9. Observations & Notes
-
-### Réseau
-- IP Host : 192.168.1.149
-- Route K8s : default via 192.168.1.1 dev enP7s7 (same machine!)
-- Le noeud K8s et le host sont sur la même machine physique (192.168.1.149)
-- Ports 80, 22, 8085 tous OPEN depuis les pods K8s
-
-### Permissions
-- Namespace `demo1` : peut créer Services et Ingresss ✅
-- Namespace `demo1` : NE PEUT PAS créer Endpoints ni EndpointSlices ❌
-- EndpointSlice nécessite un compte admin K8s ou un RBAC dédié
-
-### Docker vs systemd
-- L'approche Docker était envisagée mais abandonnée (pas d'accès build sur ce node)
-- systemd `--user` est plus simple, plus rapide, et directement testable
-- Le serveur MCP est maintenant autonome sur le host
-
-### Versions
-- MCP library : v2 (API decorator pattern)
-- Python : 3.12.3
-- Starlette : compatible SSE
-- Uvicorn : serveur ASGI
+### Priorité 3 : Monitoring
+- Surveiller les logs systemd : `journalctl --user -u infocepo-mcp.service -f`
+- Surveiller les logs Ingress : `kubectl -n ingress-nginx logs -l app.kubernetes.io/name=ingress-nginx`
+- Surveiller les health checks : `curl -sS https://mcp.ailab.infocepo.com/health`
 
 ---
 
