@@ -1,9 +1,11 @@
 """Tests for wiki fetcher module."""
 
 import pytest
+import hashlib
 import os
 import time
 import httpx
+from pathlib import Path
 
 from infocepo_mcp.wiki_fetcher import WikiFetcher
 
@@ -16,6 +18,41 @@ class TestWikiFetcher:
     def test_init_custom_base(self):
         wf = WikiFetcher(wiki_base="https://example.com/wiki/api.php")
         assert wf.wiki_base == "https://example.com/wiki/api.php"
+
+    def test_default_cache_is_scoped_to_current_user(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("INFOCEPO_WIKI_CACHE_DIR", raising=False)
+        monkeypatch.setattr("infocepo_mcp.wiki_fetcher.tempfile.gettempdir", lambda: str(tmp_path))
+        wf = WikiFetcher()
+
+        assert wf.cache_dir.name.startswith("infocepo-wiki-cache-")
+
+    def test_cache_read_permission_error_falls_back_to_upstream(self, tmp_path, monkeypatch):
+        wf = WikiFetcher(cache_dir=str(tmp_path))
+        cache_key = hashlib.md5(f"{wf.wiki_base}:Main_Page".encode()).hexdigest()
+        (tmp_path / f"{cache_key}.txt").write_text("stale")
+        original_read_text = Path.read_text
+
+        def fail_cache_read(path, *args, **kwargs):
+            if path.parent == tmp_path:
+                raise PermissionError("not readable")
+            return original_read_text(path, *args, **kwargs)
+
+        def respond(request):
+            return httpx.Response(200, request=request, json={"query": {"pages": {"1": {"revisions": [{"*": "fresh"}]}}}})
+
+        real_client = httpx.Client
+        monkeypatch.setattr("pathlib.Path.read_text", fail_cache_read)
+        monkeypatch.setattr(httpx, "Client", lambda **kwargs: real_client(transport=httpx.MockTransport(respond)))
+
+        assert wf.get_page("Main_Page") == "fresh"
+
+    def test_clear_cache_reports_unremovable_entry(self, tmp_path, monkeypatch):
+        wf = WikiFetcher(cache_dir=str(tmp_path))
+        cache_file = tmp_path / "entry.txt"
+        cache_file.write_text("cached")
+        monkeypatch.setattr("pathlib.Path.unlink", lambda self: (_ for _ in ()).throw(PermissionError("owned elsewhere")))
+
+        assert wf.clear_cache() == [str(cache_file)]
 
     def test_clean_url(self):
         wf = WikiFetcher()
