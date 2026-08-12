@@ -3,6 +3,7 @@
 
 import sys
 import json
+import base64
 import signal
 import os
 import asyncio
@@ -98,13 +99,21 @@ def handle_tool_call(name: str, arguments: dict) -> list:
             if "audio_path" in parsed:
                 with open(parsed["audio_path"], "rb") as f:
                     audio_data = f.read()
+                audio_format = parsed.get("format", "opus")
+                mime_type = {
+                    "flac": "audio/flac",
+                    "mp3": "audio/mpeg",
+                    "opus": "audio/opus",
+                    "pcm": "audio/L16",
+                    "wav": "audio/wav",
+                }.get(audio_format, "application/octet-stream")
                 return [
                     EmbeddedResource(
                         type="resource",
                         resource={
-                            "mimeType": "audio/opus",
+                            "mimeType": mime_type,
                             "uri": f"file://{parsed['audio_path']}",
-                            "blob": audio_data.hex(),
+                            "blob": base64.b64encode(audio_data).decode("ascii"),
                         }
                     ),
                     TextContent(type="text", text=result_raw),
@@ -124,7 +133,7 @@ def handle_tool_call(name: str, arguments: dict) -> list:
                                 img_data = f.read()
                             content_items.append(ImageContent(
                                 type="image",
-                                data=img_data.hex(),
+                                data=base64.b64encode(img_data).decode("ascii"),
                                 mime_type="image/png",
                             ))
                         except Exception:

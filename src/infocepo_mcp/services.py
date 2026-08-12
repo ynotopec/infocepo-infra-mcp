@@ -169,9 +169,10 @@ def handle_tts_speech(args: dict) -> str:
                 "error": f"HTTP {resp.status_code}",
                 "detail": resp.text[:500]
             })
-        tmp_path = tempfile.mktemp(suffix=".opus")
-        with open(tmp_path, "wb") as f:
+        suffix = f".{data['response_format']}"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
             f.write(resp.content)
+            tmp_path = f.name
         return json.dumps({"audio_path": tmp_path, "format": data.get("response_format"), "voice": data.get("voice")})
 
 
@@ -206,16 +207,17 @@ def handle_image_generate(args: dict) -> str:
         if "data" in result:
             for item in result["data"]:
                 if "url" in item:
-                    item["saved_to"] = tempfile.mktemp(suffix=".png")
                     with httpx.Client(timeout=30) as img_client:
                         img_resp = img_client.get(item["url"])
-                        with open(item["saved_to"], "wb") as f:
+                        img_resp.raise_for_status()
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f:
                             f.write(img_resp.content)
+                            item["saved_to"] = f.name
                 elif "b64_json" in item:
                     img_data = base64.b64decode(item["b64_json"])
-                    item["saved_to"] = tempfile.mktemp(suffix=".png")
-                    with open(item["saved_to"], "wb") as f:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as f:
                         f.write(img_data)
+                        item["saved_to"] = f.name
         return json.dumps(result, indent=2, ensure_ascii=False)
 
 
