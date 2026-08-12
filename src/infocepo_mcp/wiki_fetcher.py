@@ -3,6 +3,8 @@
 import re
 import json
 import hashlib
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
@@ -12,12 +14,41 @@ import httpx
 class WikiFetcher:
     """Fetch and parse the infocepo.com wiki to discover services and endpoints."""
 
-    def __init__(self, wiki_base: str = "https://infocepo.com/wiki/api.php", cache_dir: str = "/tmp/infocepo-wiki-cache"):
+    def __init__(self, wiki_base: str = "https://infocepo.com/wiki/api.php", cache_dir: Optional[str] = None):
         self.wiki_base = wiki_base
+        if cache_dir is None:
+            cache_dir = os.getenv("INFOCEPO_WIKI_CACHE_DIR")
+        if not cache_dir:
+            uid = os.getuid() if hasattr(os, "getuid") else "user"
+            cache_dir = str(Path(tempfile.gettempdir()) / f"infocepo-wiki-cache-{uid}")
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_cache_dir()
         self._cache = {}
         self.last_error: Optional[dict] = None
+
+    def _ensure_cache_dir(self) -> bool:
+        """Create the optional cache directory without making wiki access depend on it."""
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            return os.access(self.cache_dir, os.R_OK | os.W_OK | os.X_OK)
+        except OSError:
+            return False
+
+    def clear_cache(self) -> list[str]:
+        """Remove writable cache entries and return entries that could not be removed."""
+        if not self._ensure_cache_dir():
+            return [str(self.cache_dir)]
+        failures = []
+        try:
+            files = self.cache_dir.glob("*.txt")
+            for cache_file in files:
+                try:
+                    cache_file.unlink()
+                except OSError:
+                    failures.append(str(cache_file))
+        except OSError:
+            failures.append(str(self.cache_dir))
+        return failures
 
     def get_page(self, title: str) -> Optional[str]:
         """Fetch a wiki page's wikitext content."""
@@ -25,10 +56,14 @@ class WikiFetcher:
         cache_key = hashlib.md5(f"{self.wiki_base}:{title}".encode()).hexdigest()
         cache_file = self.cache_dir / f"{cache_key}.txt"
 
-        if cache_file.exists():
-            age = Path(cache_file).stat().st_mtime
-            if age > (time.time() - 3600):  # 1h cache
-                return cache_file.read_text()
+        try:
+            if cache_file.exists():
+                age = cache_file.stat().st_mtime
+                if age > (time.time() - 3600):  # 1h cache
+                    return cache_file.read_text()
+        except OSError:
+            # A stale cache created by another UID must not prevent an upstream fetch.
+            pass
 
         url = f"{self.wiki_base}?action=query&titles={title}&prop=revisions&rvprop=content&format=json"
         try:
@@ -67,8 +102,12 @@ class WikiFetcher:
                             text = content["slots"]["main"]["*"]
                         else:
                             text = content.get("*", "")
-                        # Cache
-                        cache_file.write_text(text)
+                        # Caching is an optimization: permission or disk errors are non-fatal.
+                        if self._ensure_cache_dir():
+                            try:
+                                cache_file.write_text(text)
+                            except OSError:
+                                pass
                         return text
         except Exception as exc:
             self.last_error = {

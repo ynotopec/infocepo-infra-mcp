@@ -55,13 +55,14 @@ def handle_tool_call(name: str, arguments: dict) -> list:
             return [TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
 
         elif name == "infra_refresh_discovery":
-            wiki_fetcher.cache_dir.mkdir(parents=True, exist_ok=True)
-            import time
-            now = time.time()
-            for f in wiki_fetcher.cache_dir.glob("*.txt"):
-                f.unlink()
+            cache_cleanup_failures = wiki_fetcher.clear_cache()
             result = wiki_fetcher.parse_main_page()
-            return [TextContent(type="text", text=json.dumps({"status": "ok", "services": len(result.get("services", [])), "urls": len(result.get("urls", []))}, indent=2))]
+            if "error" in result:
+                return [TextContent(type="text", text=json.dumps(result, indent=2, ensure_ascii=False))]
+            response = {"status": "ok", "services": len(result.get("services", [])), "urls": len(result.get("urls", []))}
+            if cache_cleanup_failures:
+                response["cache_warning"] = {"cleanup_failed": cache_cleanup_failures}
+            return [TextContent(type="text", text=json.dumps(response, indent=2))]
 
         elif name == "infra_read_wiki":
             title = arguments.get("title", "Main_Page")
