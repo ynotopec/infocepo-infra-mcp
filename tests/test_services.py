@@ -1,6 +1,10 @@
-"""Tests for tools module."""
+"""Tests for tool definitions and service result handling."""
 
-import pytest
+import base64
+import json
+from unittest.mock import patch
+
+from infocepo_mcp.server import handle_tool_call
 from infocepo_mcp.tools import list_tools
 
 
@@ -57,3 +61,33 @@ class TestTools:
             schema = tool["inputSchema"]
             assert schema["type"] == "object"
             assert "properties" in schema
+
+
+def test_tts_content_uses_base64_and_preserves_format(tmp_path):
+    audio = b"\x00\x01opus-data"
+    audio_path = tmp_path / "speech.opus"
+    audio_path.write_bytes(audio)
+
+    with patch(
+        "infocepo_mcp.server.handle_tts_speech",
+        return_value=json.dumps({"audio_path": str(audio_path), "format": "opus"}),
+    ):
+        content = handle_tool_call("tts_speech", {"text": "hello"})
+
+    resource = content[0].resource
+    assert resource.blob == base64.b64encode(audio).decode("ascii")
+    assert resource.mime_type == "audio/opus"
+
+
+def test_image_content_uses_base64(tmp_path):
+    image = b"\x89PNG\r\n\x1a\nimage-data"
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(image)
+
+    with patch(
+        "infocepo_mcp.server.handle_image_generate",
+        return_value=json.dumps({"data": [{"saved_to": str(image_path)}]}),
+    ):
+        content = handle_tool_call("image_generate", {"prompt": "test"})
+
+    assert content[1].data == base64.b64encode(image).decode("ascii")
