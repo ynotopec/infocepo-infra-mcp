@@ -474,19 +474,29 @@ async def _handle_tool_call(name: str, arguments: dict) -> str:
             for f in wiki_fetcher.cache_dir.glob("*.txt"):
                 f.unlink()
             result = wiki_fetcher.parse_main_page()
+            if "error" in result:
+                return json.dumps(result, indent=2, ensure_ascii=False)
             return json.dumps({"status": "ok", "services": len(result.get("services", [])), "urls": len(result.get("urls", []))}, indent=2)
         elif name == "infra_read_wiki":
             title = arguments.get("title", "Main_Page")
             section = arguments.get("section")
             content = wiki_fetcher.get_page(title)
             if not content:
-                return json.dumps({"error": f"Page '{title}' not found"})
+                return json.dumps({
+                    "error": f"Unable to read wiki page '{title}'",
+                    "upstream": wiki_fetcher.last_error,
+                }, indent=2, ensure_ascii=False)
             if section:
                 content = wiki_fetcher.get_section(title, section) or content
             return content
         elif name == "infra_parse_wiki":
             title = arguments.get("title", "Main_Page")
             sections = wiki_fetcher.parse_sections(title)
+            if wiki_fetcher.last_error:
+                return json.dumps({
+                    "error": f"Unable to parse wiki page '{title}'",
+                    "upstream": wiki_fetcher.last_error,
+                }, indent=2, ensure_ascii=False)
             return json.dumps(sections, indent=2, ensure_ascii=False)
         elif name == "llm_chat":
             return handle_llm_chat(arguments)

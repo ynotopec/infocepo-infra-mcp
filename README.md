@@ -32,3 +32,30 @@ Restart=on-failure
 ```
 
 Run tests with `uv run pytest`.
+
+## Open WebUI / MCPO diagnostics
+
+Open WebUI exposes MCPO operations with names such as
+`call_infra_list_services`; that `call_` prefix belongs to the generated
+OpenAPI operation and is not an MCP tool name. The corresponding MCP tool is
+`infra_list_services`.
+
+The four discovery tools (`infra_list_services`, `infra_refresh_discovery`,
+`infra_read_wiki`, and `infra_parse_wiki`) all use the same MediaWiki API.
+Consequently, a 404 reported by all four tools normally identifies one shared
+wiki upstream/path failure; it does **not** demonstrate that the LLM, audio,
+image, ChromaDB, registry, or S3 tools are unavailable. Tool responses include
+an `upstream` object with the failing URL, HTTP status, and failure kind so the
+MCPO/Open WebUI result can distinguish a missing page from a missing API route.
+
+Check each layer independently:
+
+```bash
+curl http://localhost:8085/health
+curl -H "Authorization: Bearer $MCPO_API_KEY" http://localhost:8000/openapi.json
+curl "https://infocepo.com/wiki/api.php?action=query&titles=Main_Page&format=json"
+```
+
+If `API_TOKEN` protects the MCP server, add the same bearer token to the
+`headers` object in `mcpo-config/config.json`. `MCPO_API_KEY` is separate: it
+protects MCPO's generated OpenAPI API and must be configured in Open WebUI.
