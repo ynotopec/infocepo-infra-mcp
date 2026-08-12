@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "infocepo-infra": {
-      "command": "http",
-      "url": "http://localhost:8085/sse",
-      "serverType": "sse",
+      "type": "streamable-http",
+      "url": "http://host.docker.internal:8085/mcp",
       "headers": {},
       "timeout": 30
     }

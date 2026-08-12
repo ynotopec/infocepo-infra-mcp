@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import (
     Tool, TextContent, ErrorData,
     # Request types
@@ -45,9 +46,6 @@ from infocepo_mcp.config import Config
 # Global state
 config = Config()
 wiki_fetcher = WikiFetcher()
-
-# MCP Server instance
-mcp_app: Server = Server("infocepo-infra")
 
 # ============================================================================
 # Tool definitions (static)
@@ -529,19 +527,18 @@ async def _handle_tool_call(name: str, arguments: dict) -> str:
 # MCP handler registration (decorator pattern, MCP v2)
 # ============================================================================
 
-@mcp_app.list_tools()
-async def list_tools():
+async def list_tools(context, params):
     """Return the list of available MCP tools."""
-    return _MCP_TOOLS
+    from mcp.types import ListToolsResult
+    return ListToolsResult(tools=_MCP_TOOLS)
 
 
-@mcp_app.call_tool()
-async def call_tool(name: str, arguments: dict = None):
+async def call_tool(context, params):
     """Handle a tool call."""
     import traceback as tb_module
     try:
-        args = arguments or {}
-        result_text = await _handle_tool_call(name, args)
+        args = params.arguments or {}
+        result_text = await _handle_tool_call(params.name, args)
         from mcp.types import CallToolResult, TextContent
         return CallToolResult(content=[TextContent(type="text", text=str(result_text))])
     except Exception as e:
@@ -612,7 +609,24 @@ async def openapi_probe_handler(scope, receive, send):
 # ASGI Routing
 # ============================================================================
 
+mcp_app: Server = Server(
+    "infocepo-infra",
+    version="0.1.0",
+    on_list_tools=list_tools,
+    on_call_tool=call_tool,
+)
+
 sse = SseServerTransport("/messages")
+
+# Streamable HTTP is the current MCP HTTP transport and is used by
+# api-mcp-openai.  Stateless JSON responses are particularly useful for an API
+# gateway: requests do not depend on a sticky session and regular JSON-RPC
+# responses do not require the gateway to consume an SSE stream.
+streamable_http = StreamableHTTPSessionManager(
+    app=mcp_app,
+    stateless=True,
+    json_response=True,
+)
 
 
 async def sse_handler(scope, receive, send):
@@ -674,6 +688,17 @@ async def not_found(scope, receive, send):
 
 
 async def router(scope, receive, send):
+    if scope["type"] == "lifespan":
+        async with streamable_http.run():
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+        return
+
     if scope["type"] != "http":
         return
     
@@ -690,7 +715,9 @@ async def router(scope, receive, send):
         await resp(scope, receive, send)
         return
     
-    if method == "GET" and path == "/openapi.json":
+    if path in ("/mcp", "/mcp/") and method in ("GET", "POST", "DELETE"):
+        await streamable_http.handle_request(scope, receive, send)
+    elif method == "GET" and path == "/openapi.json":
         await openapi_handler(scope, receive, send)
     elif method == "GET" and path == "/sse/openapi.json":
         await openapi_probe_handler(scope, receive, send)
