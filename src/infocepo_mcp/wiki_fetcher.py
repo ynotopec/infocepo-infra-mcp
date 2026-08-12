@@ -17,9 +17,11 @@ class WikiFetcher:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._cache = {}
+        self.last_error: Optional[dict] = None
 
     def get_page(self, title: str) -> Optional[str]:
         """Fetch a wiki page's wikitext content."""
+        self.last_error = None
         cache_key = hashlib.md5(f"{self.wiki_base}:{title}".encode()).hexdigest()
         cache_file = self.cache_dir / f"{cache_key}.txt"
 
@@ -33,12 +35,31 @@ class WikiFetcher:
             with httpx.Client(timeout=15) as client:
                 resp = client.get(url, headers={"User-Agent": "infocepo-mcp/1.0"})
                 if resp.status_code != 200:
+                    self.last_error = {
+                        "kind": "upstream_http_error",
+                        "status_code": resp.status_code,
+                        "url": str(resp.url),
+                        "message": "The MediaWiki API returned a non-success response.",
+                    }
                     return None
                 data = resp.json()
                 pages = data.get("query", {}).get("pages", {})
                 if not pages:
+                    self.last_error = {
+                        "kind": "invalid_response",
+                        "url": str(resp.url),
+                        "message": "The MediaWiki response contains no pages.",
+                    }
                     return None
                 for pid in pages:
+                    if "missing" in pages[pid]:
+                        self.last_error = {
+                            "kind": "page_not_found",
+                            "title": title,
+                            "url": str(resp.url),
+                            "message": f"Wiki page '{title}' does not exist.",
+                        }
+                        return None
                     rev = pages[pid].get("revisions", [{}])
                     if rev and rev[0]:
                         content = rev[0]
@@ -49,15 +70,22 @@ class WikiFetcher:
                         # Cache
                         cache_file.write_text(text)
                         return text
-        except Exception:
-            pass
+        except Exception as exc:
+            self.last_error = {
+                "kind": "request_failed",
+                "url": url,
+                "message": str(exc),
+            }
         return None
 
     def parse_main_page(self) -> dict:
         """Parse Main_Page and extract all service endpoints, credentials hints, and config."""
         content = self.get_page("Main_Page")
         if not content:
-            return {"error": "Failed to fetch Main_Page"}
+            return {
+                "error": "Failed to fetch Main_Page",
+                "upstream": self.last_error,
+            }
 
         result = {
             "sections": {},

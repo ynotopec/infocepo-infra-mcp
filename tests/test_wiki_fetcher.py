@@ -3,6 +3,7 @@
 import pytest
 import os
 import time
+import httpx
 
 from infocepo_mcp.wiki_fetcher import WikiFetcher
 
@@ -50,6 +51,32 @@ class TestWikiFetcher:
         wf.get_page = lambda title: "== Title ==\nContent"
         result = wf.get_section("Test", "Nonexistent")
         assert result is None
+
+    def test_get_page_preserves_upstream_http_error(self, tmp_path, monkeypatch):
+        def respond(request):
+            return httpx.Response(404, request=request)
+
+        real_client = httpx.Client
+        monkeypatch.setattr(
+            httpx,
+            "Client",
+            lambda **kwargs: real_client(transport=httpx.MockTransport(respond)),
+        )
+        wf = WikiFetcher(cache_dir=str(tmp_path))
+
+        assert wf.get_page("Main_Page") is None
+        assert wf.last_error["kind"] == "upstream_http_error"
+        assert wf.last_error["status_code"] == 404
+
+    def test_parse_main_page_includes_failure_details(self):
+        wf = WikiFetcher()
+        wf.last_error = {"kind": "upstream_http_error", "status_code": 404}
+        wf.get_page = lambda title: None
+
+        result = wf.parse_main_page()
+
+        assert result["error"] == "Failed to fetch Main_Page"
+        assert result["upstream"]["status_code"] == 404
 
 
 class TestWikiFetcherLive:
