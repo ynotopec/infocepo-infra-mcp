@@ -619,6 +619,39 @@ async def openapi_probe_handler(scope, receive, send):
     await resp(scope, receive, send)
 
 
+async def tool_http_handler(scope, receive, send, tool_name: str):
+    """Invoke a tool through the route advertised by the OpenAPI document."""
+    from starlette.responses import JSONResponse
+
+    if tool_name not in _TOOL_SCHEMAS:
+        response = JSONResponse({"error": f"Unknown tool: {tool_name}"}, status_code=404)
+        await response(scope, receive, send)
+        return
+
+    body = b""
+    while True:
+        message = await receive()
+        body += message.get("body", b"")
+        if not message.get("more_body", False):
+            break
+
+    try:
+        arguments = json.loads(body or b"{}")
+    except (TypeError, ValueError):
+        response = JSONResponse({"error": "Request body must be valid JSON."}, status_code=400)
+        await response(scope, receive, send)
+        return
+
+    if not isinstance(arguments, dict):
+        response = JSONResponse({"error": "Request body must be a JSON object."}, status_code=400)
+        await response(scope, receive, send)
+        return
+
+    result = await _handle_tool_call(tool_name, arguments)
+    response = JSONResponse({"content": result})
+    await response(scope, receive, send)
+
+
 # ============================================================================
 # ASGI Routing
 # ============================================================================
@@ -759,6 +792,8 @@ async def router(scope, receive, send):
         await openapi_handler(scope, receive, send)
     elif method == "GET" and path == "/sse/openapi.json":
         await openapi_probe_handler(scope, receive, send)
+    elif method == "POST" and path.startswith("/tools/"):
+        await tool_http_handler(scope, receive, send, path.removeprefix("/tools/"))
     elif method == "GET" and path == "/sse":
         await sse_handler(scope, receive, send)
     elif method == "POST" and path.startswith("/messages"):
