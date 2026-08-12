@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 infocepo-mcp = "infocepo_mcp.server:main"
+infocepo-mcp-http = "infocepo_mcp.sse_server:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]

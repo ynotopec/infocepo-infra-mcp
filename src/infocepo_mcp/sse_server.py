@@ -6,9 +6,13 @@ import sys
 import os
 import signal
 import asyncio
+import hmac
 from typing import Any
 from pathlib import Path
+from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+
+load_dotenv()
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -704,6 +708,30 @@ async def router(scope, receive, send):
     
     path = scope.get("path", "")
     method = scope.get("method", "GET")
+
+    # Protect every API endpoint except the health probe.  Leaving API_TOKEN
+    # unset keeps local development backwards-compatible.
+    api_token = os.getenv("API_TOKEN", "")
+    if api_token and path != "/health" and method != "OPTIONS":
+        headers = {
+            key.decode("latin-1").lower(): value.decode("latin-1")
+            for key, value in scope.get("headers", [])
+        }
+        authorization = headers.get("authorization", "")
+        supplied_token = (
+            authorization[7:]
+            if authorization.lower().startswith("bearer ")
+            else headers.get("x-api-key", "")
+        )
+        if not hmac.compare_digest(supplied_token, api_token):
+            from starlette.responses import JSONResponse
+            response = JSONResponse(
+                {"error": "unauthorized"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            await response(scope, receive, send)
+            return
     
     # Handle CORS preflight (OPTIONS) - respond with CORS headers immediately
     if method == "OPTIONS":
@@ -746,7 +774,8 @@ async def router(scope, receive, send):
 # Main entrypoint
 # ============================================================================
 
-if __name__ == "__main__":
+def main():
+    """Run the HTTP server."""
     import uvicorn
     import logging
     logging.getLogger("uvicorn").setLevel(logging.DEBUG)
@@ -762,3 +791,7 @@ if __name__ == "__main__":
     # Create app with CORS middleware
     app = CORSMiddleware(app=router, allow_origins=["*"])
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+if __name__ == "__main__":
+    main()

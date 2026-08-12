@@ -1,147 +1,34 @@
 # infocepo-infra-mcp
 
-MCP server qui expose l'infrastructure infocepo.com comme outils MCP standard.
+Token-protected MCP server for infocepo infrastructure. Its primary API is the
+current, widely supported **Streamable HTTP** transport at `/mcp`; legacy SSE is
+also available at `/sse`.
 
-## Installation
+## Start
 
-```bash
-cd infocepo-infra-mcp
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-## Configuration
-
-Créer `~/.infocepo-credentials` (format JSON) :
-
-```json
-{
-  "api_key": "sk-...",
-  "chroma_token": "CHROMA_TOKEN",
-  "s3_access_key": "AKIA...",
-  "s3_secret_key": "secret_key_here",
-  "registry_user": "user",
-  "registry_password": "REG_PASSWORD"
-}
-```
-
-Variables d'environnement (alternative au fichier) :
+Requires Linux, Python 3.11+ and [`uv`](https://docs.astral.sh/uv/). The same
+install works on x86_64 H100/DGX hosts and aarch64 DGX Spark hosts; this project
+does not install or pin CUDA drivers.
 
 ```bash
-export INFOCEPO_API_KEY=sk-...
-export INFOCEPO_CHROMA_TOKEN=...
-export INFOCEPO_S3_ACCESS_KEY=AKIA...
-export INFOCEPO_S3_SECRET_KEY=...
-export INFOCEPO_REGISTRY_PASSWORD=...
-export INFOCEPO_CREDENTIALS_FILE=/path/to/credentials.json
+./install.sh                         # safe to repeat; also upgrades dependencies
+cp .env.example .env                 # edit both required secrets
+source run.sh 0.0.0.0 8085           # omit PORT to select a free port
 ```
 
-## Configuration client
+The virtual environment is stored at `~/venv/infocepo-infra-mcp` (or
+`$VENV_DIR`). Check it with `curl http://localhost:8085/health`, then connect a
+client to `http://localhost:8085/mcp` using `Authorization: Bearer $API_TOKEN`
+(the common `X-API-Key` header is accepted too).
 
-Le serveur s'exécute en **stdio** (standard MCP) — compatible avec **tout client MCP** :
+`run.sh` stays in the foreground, handles termination normally, and is therefore
+also suitable for a user unit:
 
-```bash
-python3 -m infocepo_mcp.server
+```ini
+[Service]
+WorkingDirectory=/path/to/infocepo-infra-mcp
+ExecStart=/bin/bash /path/to/infocepo-infra-mcp/run.sh 127.0.0.1 8085
+Restart=on-failure
 ```
 
-La clé API est lue automatiquement depuis `~/.infocepo-credentials` ou la variable `INFOCEPO_API_KEY`.
-
-### Exemples d'intégration
-
-**Claude Desktop** (`claude_desktop_config.json`) :
-```json
-{
-  "mcpServers": {
-    "infocepo-infra": {
-      "command": "python3",
-      "args": ["-m", "infocepo_mcp.server"],
-      "env": {
-        "INFOCEPO_API_KEY": "your-api-key-here"
-      }
-    }
-  }
-}
-```
-
-**Open WebUI** — plugin MCP stdio :
-```bash
-python3 -m infocepo_mcp.server
-```
-
-**VS Code / Cursor** — extensions MCP supportent stdio nativement.
-
-### api-mcp-openai (HTTP)
-
-Le serveur HTTP expose le transport MCP **Streamable HTTP** sur `/mcp`,
-compatible avec [api-mcp-openai](https://github.com/ynotopec/api-mcp-openai).
-Le transport SSE historique reste disponible sur `/sse`.
-
-```bash
-python3 -m infocepo_mcp.sse_server
-```
-
-Configuration du serveur dans `api-mcp-openai` :
-
-```json
-{
-  "mcpServers": {
-    "infocepo-infra": {
-      "type": "streamable-http",
-      "url": "http://infocepo-infra-mcp:8085/mcp"
-    }
-  }
-}
-```
-
-Depuis la machine hôte, remplacez le nom Docker par
-`http://localhost:8085/mcp`. Les routes de contrôle sont `/health` et
-`/openapi.json`.
-
-## Outils disponibles
-
-### Services API
-
-| Tool | Description |
-|------|-------------|
-| `llm_chat` | Chat completions OpenAI-compatible (ai-default, ai-thinking, ai-fast, etc.) |
-| `llm_vision` | OCR / VLM — image (URL ou base64) → description |
-| `stt_transcribe` | Transcription audio → texte (whisper-1) |
-| `tts_speech` | Synthèse vocale texte → audio (opus/wav/mp3) |
-| `image_generate` | Génération d'images (OpenDalle) |
-| `embeddings_create` | Text embeddings (bge-m3) pour RAG/search |
-| `summary_text` | Résumé de longs textes |
-| `diarize_audio` | Segmentation locuteurs audio |
-
-### ChromaDB
-
-| Tool | Description |
-|------|-------------|
-| `chromadb_collections` | Lister collections |
-| `chromadb_search` | Recherche vectorielle (auto-embed) |
-| `chromadb_upsert` | Ajouter des documents vectorisés |
-
-### Registry & S3
-
-| Tool | Description |
-|------|-------------|
-| `registry_list` | Lister images Docker du registry privé |
-| `s3_list` | Lister objets dans un bucket S3 |
-| `s3_upload` | Upload fichier vers S3 |
-| `s3_download` | Download fichier depuis S3 |
-
-### Discovery (auto-wiki)
-
-| Tool | Description |
-|------|-------------|
-| `infra_list_services` | Lister tous les services découverts |
-| `infra_refresh_discovery` | Re-fetch wiki et redécouvrir |
-| `infra_read_wiki` | Lire une page wiki |
-| `infra_parse_wiki` | Parser une page wiki en sections structurées |
-
-## Test
-
-```bash
-python -m pytest tests/ -v        # Tests unitaires
-TEST_LIVE=1 python -m pytest tests/ -v  # Tests live (nécessite réseau)
-```
+Run tests with `uv run pytest`.
