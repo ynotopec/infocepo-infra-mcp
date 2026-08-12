@@ -71,6 +71,33 @@ python3 -m infocepo_mcp.server
 
 **VS Code / Cursor** — extensions MCP supportent stdio nativement.
 
+### api-mcp-openai (HTTP)
+
+Le serveur HTTP expose le transport MCP **Streamable HTTP** sur `/mcp`,
+compatible avec [api-mcp-openai](https://github.com/ynotopec/api-mcp-openai).
+Le transport SSE historique reste disponible sur `/sse`.
+
+```bash
+python3 -m infocepo_mcp.sse_server
+```
+
+Configuration du serveur dans `api-mcp-openai` :
+
+```json
+{
+  "mcpServers": {
+    "infocepo-infra": {
+      "type": "streamable-http",
+      "url": "http://infocepo-infra-mcp:8085/mcp"
+    }
+  }
+}
+```
+
+Depuis la machine hôte, remplacez le nom Docker par
+`http://localhost:8085/mcp`. Les routes de contrôle sont `/health` et
+`/openapi.json`.
+
 ## Outils disponibles
 
 ### Services API
